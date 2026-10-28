@@ -178,4 +178,6 @@ def test_file_named_repeatedly_is_scored_once(db_session, indexed_repo):
     text = "see src/app/config.py:4 and src/app/config.py:7"
     top = rank_files(db_session, indexed_repo.id, text)[0]
     assert top.path == "src/app/config.py"
-    assert top.score < 14  # one path mention (10) plus at most the full-text bonus (3)
+    # One path mention (10) + two lines inside symbols (3 each) + full-text bonus (3) = 19.
+    # Counting the path per mention instead of per file would give 29.
+    assert top.score == 19.0
