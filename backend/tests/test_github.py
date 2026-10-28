@@ -50,11 +50,11 @@ def test_webhook_endpoint(monkeypatch):
     monkeypatch.setattr(settings, "github_webhook_secret", SECRET)
     client = TestClient(app)
     body = json.dumps({"action": "opened"}).encode()
-    headers = {"X-GitHub-Event": "issues", "X-Hub-Signature-256": sign(body)}
+    headers = {"X-GitHub-Event": "ping", "X-Hub-Signature-256": sign(body)}
 
     ok = client.post("/github/webhook", content=body, headers=headers)
     assert ok.status_code == 202
-    assert ok.json() == {"event": "issues", "action": "opened"}
+    assert ok.json() == {"event": "ping", "action": "opened", "handled": False}
 
     bad = client.post(
         "/github/webhook", content=body, headers={**headers, "X-Hub-Signature-256": "sha256=0"}
