@@ -1,5 +1,7 @@
 import base64
 import os
+import shutil
+import stat
 import subprocess
 from pathlib import Path
 
@@ -36,3 +38,14 @@ def clone_repository(clone_url: str, dest: Path, token: str | None = None) -> st
     dest.parent.mkdir(parents=True, exist_ok=True)
     _git(["clone", "--depth", "1", "--no-tags", clone_url, str(dest)], token=token)
     return _git(["rev-parse", "HEAD"], cwd=dest)
+
+
+def remove_tree(path: Path) -> None:
+    """Delete a checkout; git pack files are read-only on Windows, so clear that bit and retry."""
+
+    def make_writable(func, target, _exc_info):
+        os.chmod(target, stat.S_IWRITE)
+        func(target)
+
+    if path.exists():
+        shutil.rmtree(path, onerror=make_writable)

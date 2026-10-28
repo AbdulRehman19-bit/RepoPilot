@@ -48,6 +48,10 @@ class Repository(TimestampMixin, Base):
     full_name: Mapped[str] = mapped_column(String(512))
     default_branch: Mapped[str] = mapped_column(String(255), default="main")
     indexed_commit: Mapped[str | None] = mapped_column(String(64))
+    index_status: Mapped[str] = mapped_column(
+        String(16), default="pending", server_default="pending"
+    )
+    index_error: Mapped[str | None] = mapped_column(Text)
 
     owner: Mapped[User] = relationship(back_populates="repositories")
     issues: Mapped[list["Issue"]] = relationship(back_populates="repository")

@@ -42,40 +42,46 @@ def _disconnect(session: Session, github_ids: list[int]) -> None:
         repo.installation_id = None
 
 
-def handle_installation(session: Session, payload: dict) -> bool:
+# Handlers return the repositories that may need indexing, or None when the event is ignored.
+def handle_installation(session: Session, payload: dict) -> list[Repository] | None:
     action = payload.get("action")
     installation = payload["installation"]
     account = installation["account"]
     owner = upsert_user(session, account["id"], account["login"])
 
     if action == "created":
-        for repo in payload.get("repositories", []):
+        return [
             upsert_repository(session, owner, repo["id"], repo["full_name"], installation["id"])
-        return True
+            for repo in payload.get("repositories", [])
+        ]
     if action == "deleted":
         _disconnect(session, [repo["id"] for repo in payload.get("repositories", [])])
         for repo in session.scalars(
             select(Repository).where(Repository.installation_id == installation["id"])
         ):
             repo.installation_id = None
-        return True
-    return False
+        return []
+    return None
 
 
-def handle_installation_repositories(session: Session, payload: dict) -> bool:
+def handle_installation_repositories(session: Session, payload: dict) -> list[Repository] | None:
+    if payload.get("action") not in {"added", "removed"}:
+        return None
     installation = payload["installation"]
     account = installation["account"]
     owner = upsert_user(session, account["id"], account["login"])
 
-    for repo in payload.get("repositories_added", []):
+    added = [
         upsert_repository(session, owner, repo["id"], repo["full_name"], installation["id"])
+        for repo in payload.get("repositories_added", [])
+    ]
     _disconnect(session, [repo["id"] for repo in payload.get("repositories_removed", [])])
-    return payload.get("action") in {"added", "removed"}
+    return added
 
 
-def handle_issues(session: Session, payload: dict) -> bool:
+def handle_issues(session: Session, payload: dict) -> list[Repository] | None:
     if payload.get("action") not in ISSUE_ACTIONS:
-        return False
+        return None
 
     repo_data = payload["repository"]
     owner_data = repo_data["owner"]
@@ -99,7 +105,7 @@ def handle_issues(session: Session, payload: dict) -> bool:
         session.add(issue)
     issue.title = issue_data["title"]
     issue.body = issue_data.get("body") or ""
-    return True
+    return [repo]
 
 
 HANDLERS = {
@@ -109,9 +115,9 @@ HANDLERS = {
 }
 
 
-def handle_event(session: Session, event: str, payload: dict) -> bool:
-    """Persist a webhook event. Returns False when the event is ignored."""
+def handle_event(session: Session, event: str, payload: dict) -> list[Repository] | None:
+    """Persist a webhook event. Returns None when the event is ignored."""
     handler = HANDLERS.get(event)
     if handler is None:
-        return False
+        return None
     return handler(session, payload)

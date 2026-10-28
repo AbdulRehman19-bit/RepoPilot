@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react'
 import { fetchHealth, type Health } from './api'
+import RepositoryList from './RepositoryList'
 
 export default function App() {
   const [health, setHealth] = useState<Health | null>(null)
@@ -13,10 +14,11 @@ export default function App() {
     <main>
       <h1>RepoPilot</h1>
       <p>AI bug investigator for GitHub.</p>
-      <p>
+      <p className="meta">
         API:{' '}
         {error ? `unreachable (${error})` : health ? `${health.status} (${health.environment})` : 'checking…'}
       </p>
+      <RepositoryList />
     </main>
   )
 }

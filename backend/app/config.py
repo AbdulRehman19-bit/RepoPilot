@@ -10,8 +10,11 @@ class Settings(BaseSettings):
     environment: str = "development"
     database_url: str = "postgresql+psycopg://repopilot:repopilot@localhost:5433/repopilot"
     redis_url: str = "redis://localhost:6380/0"
+    queue_name: str = "repopilot"
+    workspace_dir: Path = Path(".workspaces")
 
     github_api_url: str = "https://api.github.com"
+    github_clone_base: str = "https://github.com"
     github_app_id: str = ""
     github_private_key_path: Path | None = None
     github_webhook_secret: str = ""

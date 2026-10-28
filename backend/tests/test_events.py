@@ -40,7 +40,14 @@ def issue_payload(number: int = 1, title: str = "Crash", body: str | None = "Boo
 
 
 @pytest.fixture
-def client(monkeypatch, db_session):
+def enqueued(monkeypatch) -> list[int]:
+    queued: list[int] = []
+    monkeypatch.setattr("app.github.router.enqueue_index", queued.append)
+    return queued
+
+
+@pytest.fixture
+def client(monkeypatch, db_session, enqueued):
     monkeypatch.setattr(settings, "github_webhook_secret", SECRET)
     return TestClient(app)
 
@@ -126,3 +133,39 @@ def test_issue_opened_then_edited(client, db_session):
 def test_ignored_issue_action(client):
     response = post(client, "issues", issue_payload(action="labeled"))
     assert response.json()["handled"] is False
+
+
+def test_installation_queues_indexing_once(client, db_session, enqueued):
+    payload = {"action": "created", "installation": INSTALLATION, "repositories": [REPO]}
+    post(client, "installation", payload)
+    repo = db_session.scalar(select(Repository).where(Repository.github_id == REPO["id"]))
+    assert enqueued == [repo.id]
+    assert repo.index_status == "queued"
+
+    # A redelivery or a new issue must not queue a second job while one is in flight.
+    post(client, "installation", payload)
+    post(client, "issues", issue_payload())
+    assert enqueued == [repo.id]
+
+
+def test_failed_repository_is_requeued_by_next_event(client, db_session, enqueued):
+    post(client, "issues", issue_payload())
+    repo = db_session.scalar(select(Repository).where(Repository.github_id == REPO["id"]))
+    repo.index_status = "failed"
+    db_session.flush()
+
+    post(client, "issues", issue_payload(number=2, title="Another"))
+    assert enqueued == [repo.id, repo.id]
+
+
+def test_enqueue_failure_marks_repository_failed(client, db_session, monkeypatch):
+    def boom(_repo_id):
+        raise ConnectionError("redis down")
+
+    monkeypatch.setattr("app.github.router.enqueue_index", boom)
+    response = post(client, "issues", issue_payload())
+    assert response.status_code == 202
+
+    repo = db_session.scalar(select(Repository).where(Repository.github_id == REPO["id"]))
+    assert repo.index_status == "failed"
+    assert "enqueue" in repo.index_error
