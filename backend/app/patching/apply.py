@@ -1,0 +1,156 @@
+"""Apply model-proposed search/replace edits to a checkout, safely and verifiably.
+
+Models are unreliable at writing unified diffs with correct line numbers, so they propose
+exact-match edits instead and we generate the diff ourselves.
+"""
+
+import difflib
+import shutil
+from dataclasses import dataclass
+from pathlib import Path, PurePosixPath
+
+from pydantic import BaseModel, Field
+
+from app.sandbox.runner import COPY_IGNORE
+
+MAX_FILES = 5
+MAX_CHANGED_LINES = 200
+MAX_EDIT_CHARS = 4000
+PROTECTED_DIRS = {"tests", "test", "testing"}
+PROTECTED_NAMES = {"conftest.py", "setup.py"}
+
+
+class PatchError(ValueError):
+    """The proposed edits cannot be applied or are not allowed."""
+
+
+class Edit(BaseModel):
+    path: str = Field(description="Path of an existing .py file, relative to the repository root")
+    search: str = Field(description="Exact, contiguous lines copied from the current file")
+    replace: str = Field(description="The lines that should replace the searched lines")
+
+
+@dataclass
+class AppliedPatch:
+    diff: str
+    files: list[str]
+    changed_lines: int
+
+
+def is_protected(path: str, extra: set[str] = frozenset()) -> bool:
+    """Tests and test infrastructure may not be edited: a fix must not 'pass' by changing them."""
+    posix = PurePosixPath(path)
+    name = posix.name
+    return (
+        path in extra
+        or name in PROTECTED_NAMES
+        or name.startswith("test_")
+        or name.endswith("_test.py")
+        or any(part in PROTECTED_DIRS for part in posix.parts[:-1])
+    )
+
+
+def _resolve(root: Path, raw: str, protected: set[str]) -> tuple[str, Path]:
+    normalized = raw.replace("\\", "/").strip()
+    posix = PurePosixPath(normalized)
+    if (
+        not normalized
+        or posix.is_absolute()
+        or ":" in normalized  # drive letters such as C:/x
+        or ".." in posix.parts
+        or ".git" in posix.parts
+    ):
+        raise PatchError(f"path {raw!r} is not allowed")
+    if posix.suffix != ".py":
+        raise PatchError(f"only Python files can be edited, not {raw!r}")
+    if is_protected(normalized, protected):
+        raise PatchError(f"{raw!r} is a test or test-infrastructure file and cannot be edited")
+
+    target = root / normalized
+    if target.is_symlink() or not target.is_file():
+        raise PatchError(f"{raw!r} does not exist in the repository")
+    if root.resolve() not in target.resolve().parents:
+        raise PatchError(f"path {raw!r} escapes the repository")
+    return normalized, target
+
+
+def _trim_blank_edges(text: str) -> str:
+    return text.strip("\r\n")
+
+
+def apply_edits(root: Path, edits: list[Edit], protected: set[str] = frozenset()) -> AppliedPatch:
+    """Apply `edits` to files under `root` in place, returning the resulting unified diff."""
+    if not edits:
+        raise PatchError("the model proposed no edits")
+
+    originals: dict[str, str] = {}
+    updated: dict[str, str] = {}
+    newline: dict[str, str] = {}
+    targets: dict[str, Path] = {}
+
+    for edit in edits:
+        if len(edit.search) > MAX_EDIT_CHARS or len(edit.replace) > MAX_EDIT_CHARS:
+            raise PatchError("an edit is too large; make smaller, targeted edits")
+        path, target = _resolve(root, edit.path, set(protected))
+        if path not in originals:
+            raw = target.read_bytes().decode("utf-8")
+            newline[path] = "\r\n" if "\r\n" in raw else "\n"
+            originals[path] = updated[path] = raw.replace("\r\n", "\n")
+            targets[path] = target
+            if len(originals) > MAX_FILES:
+                raise PatchError(f"too many files edited (limit {MAX_FILES})")
+
+        search = _trim_blank_edges(edit.search.replace("\r\n", "\n"))
+        replace = _trim_blank_edges(edit.replace.replace("\r\n", "\n"))
+        if not search.strip():
+            raise PatchError(f"empty search text for {path}")
+        if search == replace:
+            raise PatchError(f"edit to {path} changes nothing")
+        occurrences = updated[path].count(search)
+        if occurrences == 0:
+            first = search.splitlines()[0][:80]
+            raise PatchError(f"search text not found in {path} (starts with {first!r})")
+        if occurrences > 1:
+            raise PatchError(
+                f"search text matches {occurrences} places in {path}; include more surrounding lines"
+            )
+        updated[path] = updated[path].replace(search, replace, 1)
+
+    diff_parts: list[str] = []
+    changed = 0
+    for path, before in originals.items():
+        after = updated[path]
+        if before == after:
+            continue
+        lines = list(
+            difflib.unified_diff(
+                before.splitlines(keepends=True),
+                after.splitlines(keepends=True),
+                fromfile=f"a/{path}",
+                tofile=f"b/{path}",
+            )
+        )
+        changed += sum(
+            1 for line in lines if line[:1] in "+-" and not line.startswith(("+++", "---"))
+        )
+        diff_parts.append("".join(line if line.endswith("\n") else line + "\n" for line in lines))
+    if not diff_parts:
+        raise PatchError("the edits do not change any file")
+    if changed > MAX_CHANGED_LINES:
+        raise PatchError(f"patch is too large ({changed} changed lines, limit {MAX_CHANGED_LINES})")
+
+    for path, text in updated.items():
+        if text != originals[path]:
+            data = text.replace("\n", newline[path]).encode("utf-8")
+            targets[path].write_bytes(data)
+    return AppliedPatch(
+        "".join(diff_parts), [p for p in originals if updated[p] != originals[p]], changed
+    )
+
+
+def make_candidate(checkout: Path, destination: Path) -> Path:
+    """A throwaway copy of the checkout that edits can be applied to."""
+    if destination.exists():
+        raise FileExistsError(destination)
+    shutil.copytree(checkout, destination, ignore=COPY_IGNORE, symlinks=True)
+    return destination

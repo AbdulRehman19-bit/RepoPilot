@@ -1,4 +1,3 @@
-from dataclasses import dataclass
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException, Query
@@ -10,10 +9,9 @@ from app.db import get_session
 from app.llm.base import LLMError
 from app.llm.explain import ModelExplanation, explain_with_model
 from app.llm.factory import get_provider
-from app.models import IndexedFile, Issue
-from app.retrieval.context import ContextBlock, build_blocks, explain
-from app.retrieval.ranker import Match, rank_files
-from app.retrieval.signals import Signals, extract_signals
+from app.models import Issue
+from app.retrieval.context import explain
+from app.retrieval.service import Investigation, investigate
 
 router = APIRouter(prefix="/issues", tags=["issues"])
 
@@ -74,14 +72,6 @@ class ExplainOut(RetrievalOut):
     analysis: ModelExplanation | None
 
 
-@dataclass
-class Investigation:
-    issue: Issue
-    signals: Signals
-    matches: list[Match]
-    blocks: list[ContextBlock]
-
-
 def _issue_out(issue: Issue) -> IssueOut:
     return IssueOut(
         id=issue.id,
@@ -97,19 +87,7 @@ def _investigate(session: Session, issue_id: int, limit: int, budget_tokens: int
         raise HTTPException(status_code=404, detail="issue not found")
     if issue.repository.index_status != "ready":
         raise HTTPException(status_code=409, detail="repository has not been indexed yet")
-
-    text = f"{issue.title}\n{issue.body}"
-    signals = extract_signals(text)
-    matches = rank_files(session, issue.repository_id, text, limit, signals=signals)
-    contents = dict(
-        session.execute(
-            select(IndexedFile.id, IndexedFile.content).where(
-                IndexedFile.id.in_([m.file_id for m in matches])
-            )
-        ).all()
-    )
-    blocks = build_blocks(matches, contents, signals.words, budget_tokens)
-    return Investigation(issue, signals, matches, blocks)
+    return investigate(session, issue, limit, budget_tokens)
 
 
 def _retrieval_out(found: Investigation) -> dict:

@@ -167,3 +167,25 @@ class TestExecution(TimestampMixin, Base):
     warnings: Mapped[list] = mapped_column(JSONB, default=list)
     output: Mapped[str | None] = mapped_column(Text)
     error: Mapped[str | None] = mapped_column(Text)
+
+
+class Patch(TimestampMixin, Base):
+    """A model-proposed fix and the record of how it was (or was not) verified."""
+
+    __tablename__ = "patches"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    issue_id: Mapped[int] = mapped_column(ForeignKey("issues.id", ondelete="CASCADE"))
+    repository_id: Mapped[int] = mapped_column(ForeignKey("repositories.id", ondelete="CASCADE"))
+    reproduction_id: Mapped[int | None] = mapped_column(
+        ForeignKey("test_executions.id", ondelete="SET NULL")
+    )
+    # queued -> running -> verified | failed | error
+    status: Mapped[str] = mapped_column(String(16), default="queued")
+    commit_sha: Mapped[str | None] = mapped_column(String(64))
+    model_name: Mapped[str | None] = mapped_column(String(255))
+    explanation: Mapped[str | None] = mapped_column(Text)
+    diff: Mapped[str | None] = mapped_column(Text)
+    edits: Mapped[list] = mapped_column(JSONB, default=list)
+    attempts: Mapped[list] = mapped_column(JSONB, default=list)
+    error: Mapped[str | None] = mapped_column(Text)

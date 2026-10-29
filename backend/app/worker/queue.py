@@ -19,3 +19,10 @@ def enqueue_execution(execution_id: int) -> None:
 
     # Dependency installation plus a full test suite can be slow; the sandbox has its own limits.
     get_queue().enqueue(run_execution_job, execution_id, job_timeout=1800)
+
+
+def enqueue_patch(patch_id: int) -> None:
+    from app.worker.patch_jobs import run_patch_job
+
+    # Several model calls (slow on CPU) plus two test runs per attempt.
+    get_queue().enqueue(run_patch_job, patch_id, job_timeout=3600)

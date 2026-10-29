@@ -27,6 +27,7 @@ class Settings(BaseSettings):
     llm_timeout_seconds: int = 180
     llm_num_ctx: int = 6144
     llm_temperature: float = 0.1
+    patch_max_attempts: int = 3
 
     github_api_url: str = "https://api.github.com"
     github_clone_base: str = "https://github.com"

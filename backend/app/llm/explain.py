@@ -35,7 +35,7 @@ class ModelExplanation(BaseModel):
     files: list[FileNote] = Field(default_factory=list)
 
 
-_DELIMITERS = re.compile(r"</?(issue|code|file)\b", re.IGNORECASE)
+_DELIMITERS = re.compile(r"</?(issue|code|file|failure|test|feedback)\b", re.IGNORECASE)
 
 
 def neutralize(text: str) -> str:

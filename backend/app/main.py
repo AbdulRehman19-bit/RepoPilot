@@ -3,6 +3,7 @@ from fastapi import FastAPI
 from app.api.executions import router as executions_router
 from app.api.issues import router as issues_router
 from app.api.llm import router as llm_router
+from app.api.patches import router as patches_router
 from app.api.repositories import router as repositories_router
 from app.config import settings
 from app.github.router import router as github_router
@@ -13,6 +14,7 @@ app.include_router(repositories_router)
 app.include_router(issues_router)
 app.include_router(executions_router)
 app.include_router(llm_router)
+app.include_router(patches_router)
 
 
 @app.get("/health")
