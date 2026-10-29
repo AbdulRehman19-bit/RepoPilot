@@ -57,12 +57,43 @@ Machine: Windows 11, Intel i5-8365U, Docker Desktop. 7 cases.
 | Verified-fix rate | n/a (no model) | 7/7 |
 | Median seconds: retrieval / reproduce / fix | 0.02 / 4.4 / n/a | 0.02 / 4.3 / 4.2 |
 
-**Real-model results: none yet.** Ollama is not installed on the development machine, so no
-language model has been measured. The "oracle" column replays the reference fix. It is not a
-model: it proves the apply, sandbox, and regression-check machinery works with a perfect proposer
-(and the test suite includes negative controls showing that a wrong fix, a fix that breaks another
-test, and an edit to the test file are all *not* verified). It says nothing about how well any
-model writes patches.
+The "oracle" column replays the reference fix. It is not a model: it proves the apply, sandbox,
+and regression-check machinery works with a perfect proposer (and the test suite includes negative
+controls showing that a wrong fix, a fix that breaks another test, and an edit to the test file
+are all *not* verified). It says nothing about how well any model writes patches.
+
+### First real-model run (2026-10-29, after step 18)
+
+`qwen2.5-coder:3b` through Ollama 0.40.13, CPU only (i5-8365U, 15.8 GB RAM), up to 3 attempts
+per case, default settings, one run each (no repeats, so no variance estimate).
+
+| | Dev set (7) | Held-out (4) |
+|---|---|---|
+| Reproduced | 7/7 | 4/4 |
+| **Verified fix** | **3/7** | **0/4** |
+| Mean attempts when verified | 1.33 | n/a |
+| Median seconds for the fix phase | 97 | 124 |
+| Wall-clock for the whole set | 10.5 min | 8.2 min |
+
+Verified: `pagination_off_by_one`, `settings_keyerror_traceback` (both first attempt) and
+`money_misdirected_traceback` (second attempt). Not verified: `lru_get_recency`,
+`pricing_discount_prose`, `slugify_punctuation`, `tags_mutable_default`, and all four held-out
+cases.
+
+How to read this:
+- **A 3B model fixes the simplest bugs and fails on the rest.** 3/11 overall. The held-out 0/4 is
+  consistent with the dev cases being easier or the model being weak; four cases cannot separate
+  the two. The retrieval change did not translate into fixes here.
+- **`money_misdirected_traceback` was verified but outside the reference files.** The model
+  changed a different file than the reference fix, and the whole suite still passes. Whether
+  that is a legitimate alternative or a symptom-level patch is not judged by this benchmark;
+  "verified" means tests pass, not that the fix is the right one.
+- **I do not know why the failures failed.** This run's report did not record per-attempt
+  outcomes (unparseable edit vs. search text not found vs. wrong logic vs. regression). The
+  runner now records them (`attempt_outcomes`); the next run will show which it is, and that
+  decides whether to work on the prompt/edit format or on the model.
+- Single run, temperature as configured: results can move between runs.
+- A larger model (7B+) would be slow or not fit on this machine; not measured.
 
 ## What it found, and what changed (step 18)
 

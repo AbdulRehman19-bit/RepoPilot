@@ -37,6 +37,7 @@ class CaseResult:
     verified: bool | None = None
     attempts: int | None = None
     fix_in_expected_files: bool | None = None
+    attempt_outcomes: list[str] = field(default_factory=list)  # e.g. invalid_edit, target_failed
     seconds: dict[str, float] = field(default_factory=dict)
     error: str | None = None
 
@@ -140,6 +141,7 @@ def _run_case(case: Case, provider: LLMProvider | None, sandbox: bool, result: C
     result.seconds["fix"] = round(time.monotonic() - started, 3)
     result.verified = outcome.verified
     result.attempts = len(outcome.attempts)
+    result.attempt_outcomes = [a.outcome for a in outcome.attempts]
     if outcome.verified:
         result.fix_in_expected_files = diff_files(outcome.diff) <= set(case.expected_files)
 
