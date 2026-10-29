@@ -11,6 +11,7 @@ import subprocess
 import threading
 import time
 import uuid
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -21,6 +22,15 @@ COPY_IGNORE = shutil.ignore_patterns(".git", ".venv", "venv", "node_modules", "_
 KILL_GRACE_SECONDS = 15
 TIMEOUT_EXIT_CODE = 124  # same convention as coreutils `timeout`
 OOM_OR_KILLED_EXIT_CODE = 137
+
+
+@dataclass(frozen=True)
+class Mount:
+    """An extra host directory made visible inside the container."""
+
+    host: Path
+    target: str
+    writable: bool = False
 
 
 class SandboxError(RuntimeError):
@@ -72,10 +82,19 @@ def docker_command(
     memory: str,
     cpus: float,
     pids_limit: int,
+    mounts: Sequence[Mount] = (),
+    env: Mapping[str, str] | None = None,
+    network: bool = False,
 ) -> list[str]:
+    extra: list[str] = []
+    for key, value in (env or {}).items():
+        extra += ["-e", f"{key}={value}"]
+    for mount in mounts:
+        mode = "rw" if mount.writable else "ro"
+        extra += ["-v", f"{mount.host.resolve().as_posix()}:{mount.target}:{mode}"]
     return [
         "docker", "run", "--rm", "--name", name,
-        "--network", "none",
+        "--network", "bridge" if network else "none",
         "--memory", memory, "--memory-swap", memory,
         "--cpus", str(cpus),
         "--pids-limit", str(pids_limit),
@@ -88,6 +107,7 @@ def docker_command(
         "--user", "1000:1000",
         "-e", "HOME=/tmp",
         "-v", f"{workdir.resolve().as_posix()}:/workspace",
+        *extra,
         "-w", "/workspace",
         image,
         *command,
@@ -124,11 +144,15 @@ def run_in_sandbox(
     pids_limit: int | None = None,
     output_limit: int | None = None,
     keep_changes_in: Path | None = None,
+    mounts: Sequence[Mount] = (),
+    env: Mapping[str, str] | None = None,
+    network: bool = False,
 ) -> SandboxResult:
     """Run `command` inside a container against a private copy of `checkout`.
 
     The original checkout is never modified. If `keep_changes_in` is given, the copy (including
-    anything the command wrote) is moved there instead of being deleted.
+    anything the command wrote) is moved there instead of being deleted. The network is off
+    unless `network=True`, which is only for the dependency-install phase.
     """
     timeout = timeout or settings.sandbox_timeout_seconds
     output_limit = output_limit or settings.sandbox_output_limit_bytes
@@ -145,6 +169,9 @@ def run_in_sandbox(
         memory=memory or settings.sandbox_memory,
         cpus=cpus or settings.sandbox_cpus,
         pids_limit=pids_limit or settings.sandbox_pids_limit,
+        mounts=mounts,
+        env=env,
+        network=network,
     )
     started = time.monotonic()
     timed_out = False

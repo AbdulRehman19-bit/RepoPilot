@@ -2,9 +2,11 @@ import enum
 from datetime import datetime
 
 from sqlalchemy import (
+    Boolean,
     Computed,
     DateTime,
     Enum,
+    Float,
     ForeignKey,
     Index,
     Integer,
@@ -13,7 +15,7 @@ from sqlalchemy import (
     UniqueConstraint,
     func,
 )
-from sqlalchemy.dialects.postgresql import TSVECTOR
+from sqlalchemy.dialects.postgresql import JSONB, TSVECTOR
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.db import Base
@@ -138,3 +140,30 @@ class Symbol(Base):
     docstring: Mapped[str | None] = mapped_column(Text)
 
     file: Mapped[IndexedFile] = relationship(back_populates="symbols")
+
+
+class TestExecution(TimestampMixin, Base):
+    """One sandboxed pytest run: a baseline of the whole suite, or a targeted reproduction."""
+
+    __test__ = False  # not a pytest test class, despite the name
+
+    __tablename__ = "test_executions"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    repository_id: Mapped[int] = mapped_column(ForeignKey("repositories.id", ondelete="CASCADE"))
+    issue_id: Mapped[int | None] = mapped_column(ForeignKey("issues.id", ondelete="SET NULL"))
+    kind: Mapped[str] = mapped_column(String(16))  # "baseline" | "reproduction"
+    status: Mapped[str] = mapped_column(String(16), default="queued")
+    selectors: Mapped[list] = mapped_column(JSONB, default=list)
+    commit_sha: Mapped[str | None] = mapped_column(String(64))
+    exit_code: Mapped[int | None] = mapped_column(Integer)
+    passed: Mapped[int] = mapped_column(Integer, default=0)
+    failed: Mapped[int] = mapped_column(Integer, default=0)
+    errors: Mapped[int] = mapped_column(Integer, default=0)
+    skipped: Mapped[int] = mapped_column(Integer, default=0)
+    timed_out: Mapped[bool] = mapped_column(Boolean, default=False)
+    duration_seconds: Mapped[float | None] = mapped_column(Float)
+    failures: Mapped[list] = mapped_column(JSONB, default=list)
+    warnings: Mapped[list] = mapped_column(JSONB, default=list)
+    output: Mapped[str | None] = mapped_column(Text)
+    error: Mapped[str | None] = mapped_column(Text)

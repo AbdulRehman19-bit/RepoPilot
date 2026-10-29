@@ -5,25 +5,7 @@ import pytest
 
 from app.config import settings
 from app.sandbox.runner import SandboxError, docker_command, run_in_sandbox
-
-
-def _image_ready() -> bool:
-    try:
-        result = subprocess.run(
-            ["docker", "image", "inspect", settings.sandbox_image],
-            capture_output=True,
-            check=False,
-            timeout=30,
-        )
-    except (OSError, subprocess.TimeoutExpired):
-        return False
-    return result.returncode == 0
-
-
-requires_docker = pytest.mark.skipif(
-    not _image_ready(),
-    reason="sandbox image not built (docker build -t repopilot-sandbox:py311 docker/sandbox)",
-)
+from tests.helpers import requires_docker
 
 
 @pytest.fixture
