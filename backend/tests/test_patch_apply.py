@@ -89,6 +89,51 @@ def test_bad_search_text_is_rejected(repo, search, message):
     assert (repo / "calc.py").read_text() == CALC
 
 
+LOOSE = 'def f(d):\n    return {k : v for k, v in d.items()}\n\n\ndef g():\n    return "x" + "y"\n'
+
+
+@pytest.fixture
+def loose_repo(tmp_path):
+    (tmp_path / "m.py").write_text(LOOSE, encoding="utf-8")
+    return tmp_path
+
+
+@pytest.mark.parametrize(
+    "search",
+    [
+        "return {k: v for k, v in d.items()}",  # space before the colon dropped
+        "    return {k : v for k , v in d.items()}",  # extra spaces, same indentation
+        "return {k : v\n    for k, v in d.items()}",  # different line breaks
+        "return {k:v for k,v in d.items()}",  # spaces removed
+    ],
+)
+def test_near_miss_search_text_is_matched_ignoring_layout(loose_repo, search):
+    apply_edits(loose_repo, [Edit(path="m.py", search=search, replace="return dict(d)")])
+    assert "return dict(d)" in (loose_repo / "m.py").read_text()
+    assert "k : v" not in (loose_repo / "m.py").read_text()
+
+
+def test_quote_style_is_ignored_but_words_are_never_joined_or_split(loose_repo):
+    apply_edits(loose_repo, [Edit(path="m.py", search="return 'x'+'y'", replace="return 1")])
+    assert (loose_repo / "m.py").read_text().endswith("def g():\n    return 1\n")
+    for bad in ("defg():", "retur n", "def f (d) :returnx"):
+        with pytest.raises(PatchError, match="not found"):
+            apply_edits(loose_repo, [Edit(path="m.py", search=bad, replace="x")])
+
+
+def test_loose_match_must_still_be_unique(tmp_path):
+    (tmp_path / "m.py").write_text("a = f(1, 2)\nb = f(1,2)\n", encoding="utf-8")
+    with pytest.raises(PatchError, match="matches 2 places"):
+        apply_edits(tmp_path, [Edit(path="m.py", search="f(1 , 2)", replace="g()")])
+    assert (tmp_path / "m.py").read_text() == "a = f(1, 2)\nb = f(1,2)\n"
+
+
+def test_exact_match_wins_over_loose_matches(tmp_path):
+    (tmp_path / "m.py").write_text("x = f(1, 2)\ny = f(1,2)\n", encoding="utf-8")
+    apply_edits(tmp_path, [Edit(path="m.py", search="f(1,2)", replace="g()")])
+    assert (tmp_path / "m.py").read_text() == "x = f(1, 2)\ny = g()\n"
+
+
 def test_no_edits_is_an_error(repo):
     with pytest.raises(PatchError, match="no edits"):
         apply_edits(repo, [])

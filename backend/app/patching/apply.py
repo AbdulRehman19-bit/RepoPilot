@@ -9,6 +9,7 @@ the identical diff.
 """
 
 import difflib
+import re
 import shutil
 from collections.abc import Iterable
 from dataclasses import dataclass
@@ -97,6 +98,39 @@ def _trim_blank_edges(text: str) -> str:
     return text.strip("\r\n")
 
 
+def _loose_pattern(search: str) -> re.Pattern[str]:
+    """A pattern for `search` that ignores whitespace layout and quote style.
+
+    Small models copy code almost right: an extra space before a colon, ' for ", different
+    indentation. Whitespace may differ or be absent next to punctuation, but two word characters
+    are never joined or split (so `a b` does not match `ab`), and a quote only matches a quote.
+    """
+    parts: list[str] = []
+    previous = ""
+    pending_space = False
+    for char in search:
+        if char.isspace():
+            pending_space = True
+            continue
+        if previous:
+            both_words = (previous.isalnum() or previous == "_") and (char.isalnum() or char == "_")
+            if pending_space:
+                parts.append(r"\s+" if both_words else r"\s*")
+            elif not both_words:
+                parts.append(r"\s*")
+        parts.append("[\"']" if char in "\"'" else re.escape(char))
+        previous, pending_space = char, False
+    return re.compile("".join(parts))
+
+
+def _locate(text: str, search: str) -> list[tuple[int, int]]:
+    """Where `search` occurs in `text`: exactly if possible, otherwise ignoring layout."""
+    exact = [(m.start(), m.end()) for m in re.finditer(re.escape(search), text)]
+    if exact:
+        return exact
+    return [(m.start(), m.end()) for m in _loose_pattern(search).finditer(text)]
+
+
 def apply_to_texts(
     texts: dict[str, str], edits: list[Edit], protected: Iterable[str] = ()
 ) -> AppliedTexts:
@@ -119,15 +153,16 @@ def apply_to_texts(
             raise PatchError(f"empty search text for {path}")
         if search == replace:
             raise PatchError(f"edit to {path} changes nothing")
-        occurrences = updated[path].count(search)
-        if occurrences == 0:
+        spans = _locate(updated[path], search)
+        if not spans:
             first = search.splitlines()[0][:80]
             raise PatchError(f"search text not found in {path} (starts with {first!r})")
-        if occurrences > 1:
+        if len(spans) > 1:
             raise PatchError(
-                f"search text matches {occurrences} places in {path}; include more surrounding lines"
+                f"search text matches {len(spans)} places in {path}; include more surrounding lines"
             )
-        updated[path] = updated[path].replace(search, replace, 1)
+        start, end = spans[0]
+        updated[path] = updated[path][:start] + replace + updated[path][end:]
 
     diff_parts: list[str] = []
     changed_files: list[str] = []

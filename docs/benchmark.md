@@ -95,6 +95,37 @@ How to read this:
 - Single run, temperature as configured: results can move between runs.
 - A larger model (7B+) would be slow or not fit on this machine; not measured.
 
+### Diagnosis and repeat runs (step 20)
+
+Same model and settings, run three times on each set (the first run above, then two more with
+per-attempt outcomes recorded; the third run is after the loose-matching change below).
+
+| | Run 1 | Run 2 | Run 3 (loose match) |
+|---|---|---|---|
+| Dev verified | 3/7 | 4/7 | 4/7 |
+| Held-out verified | 0/4 | 0/4 | 0/4 |
+
+- **The set of verified dev cases changes between runs.** `pagination_off_by_one` failed in run 2
+  and passed in runs 1 and 3; `lru_get_recency` and `tags_mutable_default` passed in run 2 only
+  or in runs 2-3. Only `settings_keyerror_traceback` and `money_misdirected_traceback` passed all
+  three times. Differences of one case between configurations are noise; do not read them as
+  improvement or regression.
+- **Where attempts fail** (runs 2 and 3 pooled, 62 attempts): about 31 applied cleanly but the
+  target tests still failed (wrong logic), 8 had an `invalid_edit` (search text not found), 1 had
+  no edits, 1 caused a regression, 8 verified (the rest are the later attempts of verified cases).
+  Wrong logic is the dominant failure; format problems are about one in six attempts.
+- **Near-miss copies were real**: e.g. the model found the right file and line but wrote
+  `{item["sku"] : item["qty"]}` for `{item["sku"]: item["qty"]}`, and in another case rewrote
+  `re.sub(r"\s+", ...)` with single quotes and an invented pattern.
+- **Change:** if the exact search text is not found, edits are matched ignoring whitespace layout
+  and quote style (word characters are never joined or split, and the match must still be
+  unique). Exact matches always win. This is tested and does not weaken verification (the
+  tests still have to pass), but **its benefit is not demonstrated**: the invalid-edit rate
+  moved from 5/29 to 5/33 attempts, within noise, and the verified counts did not change.
+- **Conclusion so far:** the 3B model's main limit is the logic of its fixes, not the edit
+  format. More runs per configuration (at least 5) are needed before comparing prompts or models.
+
+
 ## What it found, and what changed (step 18)
 
 1. **Traceback frames were weighted equally** (`settings_keyerror_traceback`, rank 2). The frame
