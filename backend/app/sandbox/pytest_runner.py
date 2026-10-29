@@ -6,6 +6,7 @@ from pathlib import Path
 
 from app.sandbox.deps import DependencyEnv
 from app.sandbox.runner import SandboxResult, run_in_sandbox
+from app.security.redact import redact
 
 # Pytest node ids such as tests/test_x.py::TestA::test_b[param]
 NODE_ID = re.compile(r"[\w./-]+\.py(?:::[\w\[\].,\-]+)+")
@@ -117,6 +118,6 @@ def run_pytest(
         failures=parsed["failures"],
         timed_out=result.timed_out,
         duration_seconds=result.duration_seconds,
-        output=(result.stdout + ("\n" + result.stderr if result.stderr.strip() else "")),
+        output=redact(result.stdout + ("\n" + result.stderr if result.stderr.strip() else "")),
         truncated=result.truncated,
     )

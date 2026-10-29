@@ -8,6 +8,7 @@ from app.patching.loop import generate_verified_patch
 from app.retrieval.service import investigate
 from app.sandbox.deps import prepare_dependencies
 from app.sandbox.pytest_runner import run_pytest
+from app.security.redact import redact
 from app.worker.execution_jobs import MAX_STORED_OUTPUT_CHARS
 
 TEST_SOURCE_LINES = 80
@@ -122,5 +123,5 @@ def run_patch_job(patch_id: int) -> None:
         except Exception as exc:  # noqa: BLE001 - any failure must be recorded on the patch
             session.rollback()
             patch = session.get(Patch, patch_id)
-            patch.status, patch.error = "error", str(exc)[:2000]
+            patch.status, patch.error = "error", redact(str(exc))[:2000]
         session.commit()

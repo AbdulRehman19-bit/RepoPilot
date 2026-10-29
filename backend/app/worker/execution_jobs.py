@@ -6,6 +6,7 @@ from app.models import Repository, TestExecution
 from app.sandbox.deps import DependencyError, prepare_dependencies
 from app.sandbox.pytest_runner import InvalidSelector, run_pytest
 from app.sandbox.runner import SandboxError
+from app.security.redact import redact
 
 MAX_STORED_OUTPUT_CHARS = 100_000
 
@@ -42,8 +43,8 @@ def run_execution_job(execution_id: int) -> None:
             execution.status = "completed"
         except (DependencyError, SandboxError, InvalidSelector) as exc:
             execution.status = "error"
-            execution.error = str(exc)[:2000]
+            execution.error = redact(str(exc))[:2000]
         except Exception as exc:  # noqa: BLE001 - any failure must be recorded on the execution
             execution.status = "error"
-            execution.error = f"unexpected error: {exc}"[:2000]
+            execution.error = redact(f"unexpected error: {exc}")[:2000]
         session.commit()

@@ -4,6 +4,7 @@ from app.github.auth import mint_installation_token
 from app.indexing.indexer import index_repository
 from app.indexing.workspace import clone_repository, remove_tree
 from app.models import Repository
+from app.security.redact import redact
 
 
 def clone_source(repo: Repository) -> tuple[str, str | None]:
@@ -36,5 +37,5 @@ def index_repository_job(repo_id: int) -> None:
             session.rollback()
             repo = session.get(Repository, repo_id)
             repo.index_status = "failed"
-            repo.index_error = str(exc)[:2000]
+            repo.index_error = redact(str(exc))[:2000]
         session.commit()

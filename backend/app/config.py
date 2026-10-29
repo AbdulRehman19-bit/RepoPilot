@@ -32,6 +32,9 @@ class Settings(BaseSettings):
     # Shared secret for the API. When empty the API is open (local development only), and the
     # approval endpoints, which write to GitHub, refuse to work.
     api_token: str = ""
+    # Request size caps, in bytes. Webhooks carry whole issue bodies; API calls are small JSON.
+    max_webhook_bytes: int = 5_000_000
+    max_request_bytes: int = 1_000_000
 
     github_api_url: str = "https://api.github.com"
     github_clone_base: str = "https://github.com"

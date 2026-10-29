@@ -1,9 +1,11 @@
 from collections.abc import Iterator
+from types import SimpleNamespace
 
 import pytest
 from sqlalchemy.orm import Session
 
 from app.db import engine, get_session
+from app.github import router as github_router
 from app.main import app
 
 
@@ -21,3 +23,11 @@ def db_session() -> Iterator[Session]:
         session.close()
         transaction.rollback()
         connection.close()
+
+
+@pytest.fixture(autouse=True)
+def no_replay_store(monkeypatch):
+    """Webhook tests must not depend on (or leave behind) claims in a real Redis."""
+    monkeypatch.setattr(
+        github_router, "replay", SimpleNamespace(claim=lambda body: True, release=lambda body: None)
+    )
