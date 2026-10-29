@@ -51,8 +51,8 @@ Machine: Windows 11, Intel i5-8365U, Docker Desktop. 7 cases.
 
 | | Model off | Oracle proposer |
 |---|---|---|
-| Retrieval hit@1 / hit@3 / hit@5 | 0.71 / 0.86 / 0.86 | same |
-| Retrieval MRR | 0.79 | same |
+| Retrieval hit@1 / hit@3 / hit@5 (before step 18) | 0.71 / 0.86 / 0.86 | same |
+| Retrieval MRR (before step 18) | 0.79 | same |
 | Reproduction rate | 7/7 | 7/7 |
 | Verified-fix rate | n/a (no model) | 7/7 |
 | Median seconds: retrieval / reproduce / fix | 0.02 / 4.4 / n/a | 0.02 / 4.3 / 4.2 |
@@ -64,19 +64,44 @@ model: it proves the apply, sandbox, and regression-check machinery works with a
 test, and an edit to the test file are all *not* verified). It says nothing about how well any
 model writes patches.
 
-## What it found
+## What it found, and what changed (step 18)
 
-1. **Traceback frames are weighted equally** (`settings_keyerror_traceback`, rank 2). The frame
-   where the exception was raised (`config.py`) lost to the frame where the call was made
-   (`cli.py`) by 0.9 points, decided only by the full-text bonus. The innermost frame should
-   count for more.
-2. **Callees that are never named are invisible** (`money_misdirected_traceback`, miss). The
-   fix belongs in `numbers.py`, which the issue never mentions; it is only reachable by following
-   imports from `money.py`. A model working from the retrieved context could not fix this case.
-   (The oracle "fixes" it only because it ignores context.)
+1. **Traceback frames were weighted equally** (`settings_keyerror_traceback`, rank 2). The frame
+   where the exception was raised lost to the caller's frame by 0.9 points. *Change:* when a
+   traceback names two or more project files, the last one (Python prints the innermost call
+   last) gets +2.0.
+2. **Callees that are never named were invisible** (`money_misdirected_traceback`, miss). The fix
+   is in `numbers.py`, which the issue never mentions. *Change:* for the top two matches, the
+   functions inside the focused code (the symbol the issue names or the traceback line is in)
+   are looked up, and files defining them get +4.0 (weaker than any direct mention). Names
+   defined in more than two files are ignored.
 
-Both are pinned as strict expected-failures in `backend/tests/test_bench.py`, so the suite will
-fail, prompting a baseline update, when either is fixed.
+Both used to be pinned as strict expected-failures; those are now ordinary regression tests.
+
+### Held-out cases (`backend/bench/cases_heldout/`)
+
+Four further bugs, written and validated *before* the ranker was changed, kept in a separate
+directory, and not used to choose the two constants above (+2.0 and +4.0 were picked in advance,
+not fitted). `python -m bench run --cases bench/cases_heldout`.
+
+| | Before | After |
+|---|---|---|
+| Dev set (7 cases) hit@1 / hit@3 / MRR | 0.71 / 0.86 / 0.79 | 0.86 / 1.00 / 0.91 |
+| Held-out (4 cases) hit@1 / hit@3 / MRR | 0.00 / 0.75 / 0.40 | 0.50 / 1.00 / 0.75 |
+
+No dev case got worse. The dev-set gain is not evidence, since the dev cases are where the
+weaknesses were found. The held-out gain is the number to look at, with the caveats that
+follow.
+
+- **Four cases is far too few** to separate a real gain from luck; one case changes hit@1 by 0.25.
+- **The same person wrote them**, after deciding what to build. They test whether the features
+  generalise to new layouts, not whether they help on real-world bugs.
+- I predicted `scheduler_caller_heavily_named` would stay at rank 2 (the caller has more named
+  symbols). It ranks 1. I did not investigate why; treat it as luck until shown otherwise.
+- Both callee cases rank 2, not 1: the file the issue names still outranks the real root cause,
+  by design, since a mentioned file is better evidence than a followed call.
+- Following calls only works for Python, one hop deep, and only when the function is found by
+  simple name. Calls through variables, decorators, dynamic dispatch or other languages are missed.
 
 ## Limits of this benchmark
 
@@ -94,7 +119,7 @@ fail, prompting a baseline update, when either is fixed.
 - Add 30-50 real bugs mined from small open-source Python projects (a failing test at a known
   commit and the commit that fixed it), including some with dependencies. Keep part of them
   unseen while developing.
-- Fix the two weaknesses above (innermost-frame weighting; following imports from top-ranked
-  files) and measure against the new cases.
+- Grow the held-out set with real bugs, which is the only thing that will say whether step 18
+  helped outside hand-built cases.
 - Run the `ollama` mode for each candidate model and record hit/fix rates and wall-clock time
   on this CPU-only machine.

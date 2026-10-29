@@ -1,5 +1,6 @@
 # Benchmark cases and anything that runs on Linux must keep LF line endings, even when
 # checked out on Windows with core.autocrlf enabled.
 backend/bench/cases/** text eol=lf
+backend/bench/cases_heldout/** text eol=lf
 docker/** text eol=lf
 *.sh text eol=lf

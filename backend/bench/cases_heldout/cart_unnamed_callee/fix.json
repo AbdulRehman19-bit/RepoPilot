@@ -1,0 +1,7 @@
+[
+  {
+    "path": "checkout/rules.py",
+    "search": "amount - amount * percent // 100",
+    "replace": "amount - amount * percent / 100"
+  }
+]

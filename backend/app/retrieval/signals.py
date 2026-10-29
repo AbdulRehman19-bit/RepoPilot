@@ -142,6 +142,7 @@ MAX_WORDS = 30
 class PathRef:
     path: str  # normalized to forward slashes
     line: int | None = None
+    frame: bool = False  # a traceback frame (Python lists the innermost call last)
 
 
 @dataclass
@@ -178,14 +179,14 @@ def extract_signals(text: str) -> Signals:
     signals = Signals()
     seen_paths: set[PathRef] = set()
 
-    def add_path(raw: str, line: str | None) -> None:
-        ref = PathRef(_normalize_path(raw), int(line) if line else None)
+    def add_path(raw: str, line: str | None, frame: bool = False) -> None:
+        ref = PathRef(_normalize_path(raw), int(line) if line else None, frame)
         if ref not in seen_paths:
             seen_paths.add(ref)
             signals.paths.append(ref)
 
     for path, line, func in TRACEBACK_FRAME.findall(text):
-        add_path(path, line)
+        add_path(path, line, frame=True)
         if func and not func.startswith("<"):
             _add_ident(signals.identifiers, func)
 

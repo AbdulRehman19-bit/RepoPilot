@@ -1,0 +1,7 @@
+[
+  {
+    "path": "inventory/storage.py",
+    "search": "    data = json.loads(text)\n",
+    "replace": "    if not text.strip():\n        return {}\n    data = json.loads(text)\n"
+  }
+]

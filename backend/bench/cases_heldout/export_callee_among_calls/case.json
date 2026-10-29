@@ -1,0 +1,15 @@
+{
+  "id": "export_callee_among_calls",
+  "kind": "misdirected",
+  "description": "export_rows writes broken CSV for values with commas; to_csv_line (never named) does no quoting.",
+  "issue": {
+    "title": "Exported CSV has extra columns when a value contains a comma",
+    "body": "Calling `export_rows(rows, path)` from tools/export.py with a row like `[\"Smith, Jo\", 3]` produces a line with three fields instead of two, so spreadsheets misalign the columns."
+  },
+  "expected_files": [
+    "tools/csvfmt.py"
+  ],
+  "failing_tests": [
+    "tests/test_csvfmt.py::test_values_with_commas_and_quotes_are_quoted"
+  ]
+}

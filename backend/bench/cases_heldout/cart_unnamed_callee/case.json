@@ -1,0 +1,15 @@
+{
+  "id": "cart_unnamed_callee",
+  "kind": "misdirected",
+  "description": "Combined discounts are off by 0.5; percent_off (never named) floors with //.",
+  "issue": {
+    "title": "Cart total is a little off when a coupon and member pricing are combined",
+    "body": "With a single item at 100.00, a 10 off coupon and member pricing (5 off), `Cart.total()` in checkout/cart.py returns 86.0 but the price should be 85.5. Either discount on its own is fine."
+  },
+  "expected_files": [
+    "checkout/rules.py"
+  ],
+  "failing_tests": [
+    "tests/test_cart.py::test_coupon_and_member_prices_combine"
+  ]
+}

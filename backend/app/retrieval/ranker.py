@@ -1,5 +1,6 @@
 """Rank indexed files by how likely they are to contain the bug described in an issue."""
 
+import ast
 import re
 from dataclasses import dataclass, field
 
@@ -16,6 +17,14 @@ QUALNAME_SYMBOL_SCORE = 6.0
 SYMBOL_SCORE_CAP = 12.0
 FULL_TEXT_SCORE = 3.0
 FULL_TEXT_CANDIDATES = 50
+# Python prints the innermost call last. When the last frame lives in a different project file
+# than the earlier ones, that is where the exception was raised, so it gets a little extra.
+INNERMOST_FRAME_BONUS = 2.0
+# Files defining functions that the best matches call, since a bug is often one call deeper than
+# the code the issue names. Weaker than any direct mention.
+FOLLOW_CALL_SCORE = 4.0
+FOLLOW_FROM_TOP = 2
+AMBIGUOUS_CALLEE_FILES = 2  # a name defined in more files than this says nothing about one of them
 
 
 @dataclass
@@ -90,6 +99,18 @@ def rank_files(
                 line_hints.setdefault(by_path[path], []).append(ref.line)
                 match.hint_lines.append(ref.line)
 
+    # Of the traceback frames that are project files, the last one is the innermost.
+    framed = [
+        by_path[path]
+        for ref in signals.paths
+        if ref.frame
+        for path in _path_matches(ref.path, list(by_path))[:1]
+    ]
+    if len(set(framed)) > 1:
+        innermost = framed[-1]
+        matches[innermost].score += INNERMOST_FRAME_BONUS
+        matches[innermost].reasons.append("innermost project frame of the traceback")
+
     # 2. Symbols the issue names, and symbols enclosing a traceback line.
     strong = signals.identifiers
     if strong or line_hints:
@@ -156,7 +177,77 @@ def rank_files(
             match.reasons.append(f"text match (relevance {file_rank:.2f})")
 
     ranked = sorted(matches.values(), key=lambda m: (-m.score, m.path))
+    if _follow_calls(session, repository_id, ranked[:FOLLOW_FROM_TOP], matches, by_path):
+        ranked = sorted(matches.values(), key=lambda m: (-m.score, m.path))
     for match in ranked:
         match.score = round(match.score, 3)
         match.focus = list({(f.start_line, f.end_line): f for f in match.focus}.values())
     return ranked[:limit]
+
+
+def _called_names(source: str, ranges: list[tuple[int, int]]) -> set[str]:
+    try:
+        tree = ast.parse(source)
+    except (SyntaxError, ValueError):
+        return set()
+    names: set[str] = set()
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Call) and any(a <= node.lineno <= b for a, b in ranges):
+            target = node.func
+            if isinstance(target, ast.Name):
+                names.add(target.id)
+            elif isinstance(target, ast.Attribute):
+                names.add(target.attr)
+    return names
+
+
+def _follow_calls(
+    session: Session,
+    repository_id: int,
+    top: list[Match],
+    matches: dict[int, Match],
+    by_path: dict[str, int],
+) -> bool:
+    """Credit files that define what the best matches' focused code calls. True if any scored."""
+    changed = False
+    for source in top:
+        if not source.focus or not source.path.endswith(".py"):
+            continue
+        # Prefer the narrowest focus: drop a range that merely contains another (e.g. a class
+        # around the method the issue is about).
+        ranges = [(f.start_line, f.end_line) for f in source.focus]
+        narrow = [
+            r for r in ranges if not any(o != r and r[0] <= o[0] and o[1] <= r[1] for o in ranges)
+        ]
+        content = session.scalar(
+            select(IndexedFile.content).where(IndexedFile.id == source.file_id)
+        )
+        names = _called_names(content or "", narrow)
+        if not names:
+            continue
+
+        rows = session.execute(
+            select(Symbol.name, Symbol.file_id, Symbol.qualname)
+            .join(IndexedFile)
+            .where(IndexedFile.repository_id == repository_id, Symbol.name.in_(names))
+        ).all()
+        files_defining: dict[str, set[int]] = {}
+        for name, file_id, _ in rows:
+            files_defining.setdefault(name, set()).add(file_id)
+
+        path_of = {file_id: path for path, file_id in by_path.items()}
+        credited: set[int] = set()
+        for name, file_id, qualname in rows:
+            if (
+                file_id == source.file_id
+                or file_id in credited
+                or len(files_defining[name]) > AMBIGUOUS_CALLEE_FILES
+            ):
+                continue
+            credited.add(file_id)
+            target = matches.get(file_id) or Match(file_id=file_id, path=path_of[file_id])
+            matches[file_id] = target
+            target.score += FOLLOW_CALL_SCORE
+            target.reasons.append(f"defines `{qualname}`, called from {source.path}")
+            changed = True
+    return changed

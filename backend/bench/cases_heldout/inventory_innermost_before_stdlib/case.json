@@ -1,0 +1,15 @@
+{
+  "id": "inventory_innermost_before_stdlib",
+  "kind": "traceback",
+  "description": "An empty stock file makes parse_stock raise JSONDecodeError; the fix belongs in storage.py.",
+  "issue": {
+    "title": "Starting up with an empty stock file crashes",
+    "body": "After a fresh install the stock file is empty and the app dies on start:\n\n```\nTraceback (most recent call last):\n  File \"/srv/inventory/app.py\", line 5, in main\n    return load_stock(path)\n  File \"/srv/inventory/service.py\", line 7, in load_stock\n    return parse_stock(text)\n  File \"/srv/inventory/storage.py\", line 6, in parse_stock\n    data = json.loads(text)\n  File \"/usr/lib/python3.11/json/__init__.py\", line 346, in loads\n    return _default_decoder.decode(s)\n  File \"/usr/lib/python3.11/json/decoder.py\", line 355, in raw_decode\n    raise JSONDecodeError(\"Expecting value\", s, err.value) from None\njson.decoder.JSONDecodeError: Expecting value: line 1 column 1 (char 0)\n```\n\nAn empty file should just mean there is no stock yet."
+  },
+  "expected_files": [
+    "inventory/storage.py"
+  ],
+  "failing_tests": [
+    "tests/test_storage.py::test_empty_file_means_empty_stock"
+  ]
+}

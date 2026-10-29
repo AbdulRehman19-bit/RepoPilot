@@ -3,7 +3,7 @@ import json
 import pytest
 
 from app.config import settings
-from bench.cases import load_case, load_cases
+from bench.cases import DEFAULT_CASES_DIR, load_case, load_cases
 from bench.oracle import OracleProvider
 from bench.runner import (
     CaseResult,
@@ -15,6 +15,8 @@ from bench.runner import (
     validate_case,
 )
 from tests.helpers import requires_docker
+
+HELDOUT_DIR = DEFAULT_CASES_DIR.parent / "cases_heldout"
 
 
 @pytest.fixture(scope="module")
@@ -152,10 +154,20 @@ def test_markdown_table_and_diff_files():
 
 BASELINE_RANKS = {
     "lru_get_recency": 1,
+    "money_misdirected_traceback": 3,
     "pagination_off_by_one": 1,
     "pricing_discount_prose": 1,
+    "settings_keyerror_traceback": 1,
     "slugify_punctuation": 1,
     "tags_mutable_default": 1,
+}
+# Written before the ranker changes that target them, kept in a separate directory, and not used
+# to choose any weight. Still written by the same author: see docs/benchmark.md.
+HELDOUT_RANKS = {
+    "cart_unnamed_callee": 2,
+    "export_callee_among_calls": 2,
+    "inventory_innermost_before_stdlib": 1,
+    "scheduler_caller_heavily_named": 1,
 }
 
 
@@ -164,28 +176,30 @@ def retrieval(cases):
     return {cid: run_case(case, None, sandbox=False) for cid, case in cases.items()}
 
 
+@pytest.fixture(scope="module")
+def heldout():
+    return {c.id: run_case(c, None, sandbox=False) for c in load_cases(HELDOUT_DIR)}
+
+
 def test_retrieval_baseline_has_not_regressed(retrieval):
     assert not [r.error for r in retrieval.values() if r.error]
-    for case_id, expected_rank in BASELINE_RANKS.items():
-        assert retrieval[case_id].rank == expected_rank, case_id
-    assert retrieval["settings_keyerror_traceback"].rank in (1, 2)
-    assert summarize(list(retrieval.values()))["retrieval"]["hit@5"] >= 0.85
+    assert {cid: r.rank for cid, r in retrieval.items()} == BASELINE_RANKS
+    assert summarize(list(retrieval.values()))["retrieval"]["hit@3"] == 1.0
 
 
-# Known weaknesses, found by this benchmark. They are strict expected failures so that fixing
-# one makes the suite fail until the baseline above is deliberately updated.
+def test_heldout_retrieval_baseline_has_not_regressed(heldout):
+    assert not [r.error for r in heldout.values() if r.error]
+    assert {cid: r.rank for cid, r in heldout.items()} == HELDOUT_RANKS
+    assert summarize(list(heldout.values()))["retrieval"]["hit@3"] == 1.0
 
 
-@pytest.mark.xfail(strict=True, reason="all traceback frames score alike; the innermost should win")
-def test_known_weakness_innermost_traceback_frame_should_rank_first(retrieval):
-    assert retrieval["settings_keyerror_traceback"].rank == 1
-
-
-@pytest.mark.xfail(
-    strict=True, reason="the root cause is a callee that is never named in the issue"
-)
-def test_known_weakness_misdirected_root_cause_is_not_retrieved(retrieval):
-    assert retrieval["money_misdirected_traceback"].rank is not None
+def test_heldout_cases_are_well_formed():
+    cases = load_cases(HELDOUT_DIR)
+    assert len(cases) >= 4
+    for case in cases:
+        assert case.title and case.body and case.fix_edits
+        assert all((case.repo_dir / p).is_file() for p in case.expected_files)
+        assert not any(b"\r\n" in p.read_bytes() for p in case.repo_dir.rglob("*.py"))
 
 
 # --- Sandbox-backed checks -----------------------------------------------------------------------

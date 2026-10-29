@@ -1,0 +1,7 @@
+[
+  {
+    "path": "tools/csvfmt.py",
+    "search": "    return \",\".join(str(value) for value in row)\n",
+    "replace": "    def quote(value):\n        text = str(value)\n        if any(c in text for c in ',\"\\n'):\n            return '\"' + text.replace('\"', '\"\"') + '\"'\n        return text\n\n    return \",\".join(quote(value) for value in row)\n"
+  }
+]

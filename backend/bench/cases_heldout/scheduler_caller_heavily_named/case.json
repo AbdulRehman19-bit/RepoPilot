@@ -1,0 +1,15 @@
+{
+  "id": "scheduler_caller_heavily_named",
+  "kind": "traceback",
+  "description": "A */0 expression raises ZeroDivisionError in next_run; the issue talks mostly about the caller.",
+  "issue": {
+    "title": "Scheduler blows up with ZeroDivisionError for a `*/0` job",
+    "body": "I add jobs with `schedule_job` and nothing complains, but as soon as `run_due` runs:\n\n```\nTraceback (most recent call last):\n  File \"scheduler/runner.py\", line 14, in run_due\n    if next_run(expr, now) <= now:\n  File \"scheduler/cron.py\", line 5, in next_run\n    return now + (step - now % step) % step\nZeroDivisionError: integer modulo by zero\n```\n\nI would expect a clear error instead of a ZeroDivisionError."
+  },
+  "expected_files": [
+    "scheduler/cron.py"
+  ],
+  "failing_tests": [
+    "tests/test_cron.py::test_zero_step_is_rejected_with_a_clear_error"
+  ]
+}

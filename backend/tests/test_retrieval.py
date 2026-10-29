@@ -37,7 +37,7 @@ ValueError: empty config
 
 def test_signals_from_traceback():
     signals = extract_signals(TRACEBACK)
-    assert PathRef("/home/user/proj/src/app/config.py", 4) in signals.paths
+    assert PathRef("/home/user/proj/src/app/config.py", 4, frame=True) in signals.paths
     assert {"load", "parse_config"} <= signals.identifiers
     assert "ValueError" in signals.error_types
     assert "empty" in signals.words
@@ -58,7 +58,7 @@ def test_signals_from_prose():
 
 def test_signals_normalize_windows_paths():
     signals = extract_signals(r'File "C:\proj\src\app\config.py", line 3, in <module>')
-    assert signals.paths == [PathRef("C:/proj/src/app/config.py", 3)]
+    assert signals.paths == [PathRef("C:/proj/src/app/config.py", 3, frame=True)]
     assert "<module>" not in signals.identifiers
 
 
@@ -181,3 +181,85 @@ def test_file_named_repeatedly_is_scored_once(db_session, indexed_repo):
     # One path mention (10) + two lines inside symbols (3 each) + full-text bonus (3) = 19.
     # Counting the path per mention instead of per file would give 29.
     assert top.score == 19.0
+
+
+# --- Innermost traceback frame and following calls -----------------------------------------------
+
+
+def add_file(session, repo, path, content):
+    session.add(
+        IndexedFile(
+            repository_id=repo.id,
+            path=path,
+            language="python",
+            size=len(content),
+            line_count=content.count("\n"),
+            content=content,
+            symbols=[
+                Symbol(
+                    name=s.name,
+                    qualname=s.qualname,
+                    kind=s.kind,
+                    start_line=s.start_line,
+                    end_line=s.end_line,
+                    docstring=s.docstring,
+                )
+                for s in extract_symbols(content)
+            ],
+        )
+    )
+    session.flush()
+
+
+def reasons(matches, path):
+    return next(m.reasons for m in matches if m.path == path)
+
+
+def test_innermost_project_frame_gets_a_bonus(db_session, indexed_repo):
+    text = (
+        "Traceback (most recent call last):\n"
+        '  File "src/app/billing.py", line 3, in compute_invoice_total\n'
+        '  File "src/app/config.py", line 7, in parse_config\n'
+        "ValueError: boom"
+    )
+    matches = rank_files(db_session, indexed_repo.id, text)
+    assert any("innermost" in r for r in reasons(matches, "src/app/config.py"))
+    assert not any("innermost" in r for r in reasons(matches, "src/app/billing.py"))
+
+
+def test_no_innermost_bonus_when_only_one_project_file_is_in_the_traceback(
+    db_session, indexed_repo
+):
+    text = (
+        "Traceback (most recent call last):\n"
+        '  File "src/app/config.py", line 4, in load\n'
+        '  File "src/app/config.py", line 7, in parse_config\n'
+        '  File "/usr/lib/python3.11/json/decoder.py", line 355, in raw_decode\n'
+        "ValueError: boom"
+    )
+    matches = rank_files(db_session, indexed_repo.id, text)
+    assert not any("innermost" in r for r in reasons(matches, "src/app/config.py"))
+
+
+CALLER = "def run_job():\n    return helper_fn(1)\n\n\ndef other():\n    return unrelated_fn()\n"
+HELPER = "def helper_fn(x):\n    return x\n"
+
+
+def test_files_defining_called_functions_are_credited(db_session, indexed_repo):
+    add_file(db_session, indexed_repo, "src/jobs.py", CALLER)
+    add_file(db_session, indexed_repo, "src/helpers.py", HELPER)
+    add_file(db_session, indexed_repo, "src/misc.py", "def unrelated_fn():\n    return 0\n")
+
+    matches = rank_files(db_session, indexed_repo.id, "`run_job` in src/jobs.py misbehaves")
+    assert any("called from src/jobs.py" in r for r in reasons(matches, "src/helpers.py"))
+    # Only the function the issue is about is followed, not the rest of the file.
+    assert "src/misc.py" not in {m.path for m in matches}
+
+
+def test_ambiguous_callee_names_are_not_followed(db_session, indexed_repo):
+    add_file(db_session, indexed_repo, "src/jobs.py", CALLER)
+    for name in ("a", "b", "c"):  # defined in three files: says nothing about any one of them
+        add_file(db_session, indexed_repo, f"src/{name}.py", HELPER)
+
+    matches = rank_files(db_session, indexed_repo.id, "`run_job` in src/jobs.py misbehaves")
+    assert not any(m.path in {"src/a.py", "src/b.py", "src/c.py"} for m in matches)

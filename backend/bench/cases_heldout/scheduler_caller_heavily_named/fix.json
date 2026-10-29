@@ -1,0 +1,7 @@
+[
+  {
+    "path": "scheduler/cron.py",
+    "search": "        step = int(expr[2:])\n",
+    "replace": "        step = int(expr[2:])\n        if step <= 0:\n            raise ValueError(\"step must be positive\")\n"
+  }
+]
