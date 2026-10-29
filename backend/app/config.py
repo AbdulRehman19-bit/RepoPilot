@@ -20,6 +20,14 @@ class Settings(BaseSettings):
     sandbox_pids_limit: int = 128
     sandbox_output_limit_bytes: int = 200_000
 
+    # "ollama" talks to a local Ollama server; "none" disables the model entirely.
+    llm_provider: str = "ollama"
+    ollama_url: str = "http://localhost:11434"
+    ollama_model: str = "qwen2.5-coder:3b"
+    llm_timeout_seconds: int = 180
+    llm_num_ctx: int = 6144
+    llm_temperature: float = 0.1
+
     github_api_url: str = "https://api.github.com"
     github_clone_base: str = "https://github.com"
     github_app_id: str = ""

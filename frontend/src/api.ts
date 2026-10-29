@@ -64,3 +64,20 @@ export interface Retrieval {
 export const fetchIssues = () => request<Issue[]>('/issues')
 export const investigateIssue = (id: number) =>
   request<Retrieval>(`/issues/${id}/retrieve`, { method: 'POST' })
+
+export interface Analysis {
+  summary: string
+  suspected_cause: string
+  confidence: 'low' | 'medium' | 'high'
+  files: { path: string; why: string }[]
+}
+
+export interface Explained extends Retrieval {
+  model_used: boolean
+  model_name: string | null
+  model_error: string | null
+  analysis: Analysis | null
+}
+
+export const explainIssue = (id: number) =>
+  request<Explained>(`/issues/${id}/explain`, { method: 'POST' })

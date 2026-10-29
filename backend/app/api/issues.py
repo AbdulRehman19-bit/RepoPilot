@@ -1,3 +1,4 @@
+from dataclasses import dataclass
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException, Query
@@ -6,10 +7,13 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.db import get_session
+from app.llm.base import LLMError
+from app.llm.explain import ModelExplanation, explain_with_model
+from app.llm.factory import get_provider
 from app.models import IndexedFile, Issue
-from app.retrieval.context import build_blocks, explain
-from app.retrieval.ranker import rank_files
-from app.retrieval.signals import extract_signals
+from app.retrieval.context import ContextBlock, build_blocks, explain
+from app.retrieval.ranker import Match, rank_files
+from app.retrieval.signals import Signals, extract_signals
 
 router = APIRouter(prefix="/issues", tags=["issues"])
 
@@ -61,6 +65,23 @@ class RetrievalOut(BaseModel):
     context_tokens: int
 
 
+class ExplainOut(RetrievalOut):
+    """Retrieval plus an optional model-written analysis. Works without a model."""
+
+    model_used: bool
+    model_name: str | None
+    model_error: str | None
+    analysis: ModelExplanation | None
+
+
+@dataclass
+class Investigation:
+    issue: Issue
+    signals: Signals
+    matches: list[Match]
+    blocks: list[ContextBlock]
+
+
 def _issue_out(issue: Issue) -> IssueOut:
     return IssueOut(
         id=issue.id,
@@ -70,19 +91,7 @@ def _issue_out(issue: Issue) -> IssueOut:
     )
 
 
-@router.get("")
-def list_issues(session: SessionDep) -> list[IssueOut]:
-    issues = session.scalars(select(Issue).order_by(Issue.updated_at.desc()).limit(100))
-    return [_issue_out(issue) for issue in issues]
-
-
-@router.post("/{issue_id}/retrieve")
-def retrieve(
-    issue_id: int,
-    session: SessionDep,
-    limit: Annotated[int, Query(ge=1, le=25)] = 8,
-    budget_tokens: Annotated[int, Query(ge=500, le=16000)] = 3000,
-) -> RetrievalOut:
+def _investigate(session: Session, issue_id: int, limit: int, budget_tokens: int) -> Investigation:
     issue = session.get(Issue, issue_id)
     if issue is None:
         raise HTTPException(status_code=404, detail="issue not found")
@@ -100,14 +109,18 @@ def retrieve(
         ).all()
     )
     blocks = build_blocks(matches, contents, signals.words, budget_tokens)
-    return RetrievalOut(
-        issue=_issue_out(issue),
-        signals=SignalsOut(
-            paths=[ref.path + (f":{ref.line}" if ref.line else "") for ref in signals.paths],
-            identifiers=sorted(signals.identifiers),
-            error_types=sorted(signals.error_types),
+    return Investigation(issue, signals, matches, blocks)
+
+
+def _retrieval_out(found: Investigation) -> dict:
+    return {
+        "issue": _issue_out(found.issue),
+        "signals": SignalsOut(
+            paths=[ref.path + (f":{ref.line}" if ref.line else "") for ref in found.signals.paths],
+            identifiers=sorted(found.signals.identifiers),
+            error_types=sorted(found.signals.error_types),
         ),
-        matches=[
+        "matches": [
             MatchOut(
                 path=m.path,
                 score=m.score,
@@ -115,8 +128,65 @@ def retrieve(
                 reasons=m.reasons,
                 focus=[FocusOut(**vars(f)) for f in m.focus],
             )
-            for m in matches
+            for m in found.matches
         ],
-        context=[ContextBlockOut(**vars(b)) for b in blocks],
-        context_tokens=sum(b.tokens for b in blocks),
+        "context": [ContextBlockOut(**vars(b)) for b in found.blocks],
+        "context_tokens": sum(b.tokens for b in found.blocks),
+    }
+
+
+@router.get("")
+def list_issues(session: SessionDep) -> list[IssueOut]:
+    issues = session.scalars(select(Issue).order_by(Issue.updated_at.desc()).limit(100))
+    return [_issue_out(issue) for issue in issues]
+
+
+@router.post("/{issue_id}/retrieve")
+def retrieve(
+    issue_id: int,
+    session: SessionDep,
+    limit: Annotated[int, Query(ge=1, le=25)] = 8,
+    budget_tokens: Annotated[int, Query(ge=500, le=16000)] = 3000,
+) -> RetrievalOut:
+    return RetrievalOut(**_retrieval_out(_investigate(session, issue_id, limit, budget_tokens)))
+
+
+@router.post("/{issue_id}/explain")
+def explain_issue(
+    issue_id: int,
+    session: SessionDep,
+    limit: Annotated[int, Query(ge=1, le=25)] = 6,
+    budget_tokens: Annotated[int, Query(ge=500, le=8000)] = 2500,
+) -> ExplainOut:
+    """Retrieval plus a model-written analysis; falls back to retrieval alone if no model works."""
+    found = _investigate(session, issue_id, limit, budget_tokens)
+    result = ExplainOut(
+        **_retrieval_out(found),
+        model_used=False,
+        model_name=None,
+        model_error=None,
+        analysis=None,
     )
+    if not found.matches:
+        result.model_error = "no relevant files were found to analyse"
+        return result
+
+    provider = get_provider()
+    if provider is None:
+        result.model_error = "the model is disabled (REPOPILOT_LLM_PROVIDER=none)"
+        return result
+    ok, reason = provider.available()
+    if not ok:
+        result.model_error = reason
+        return result
+
+    try:
+        result.analysis = explain_with_model(
+            provider, found.issue.title, found.issue.body, found.matches, found.blocks
+        )
+    except LLMError as exc:
+        result.model_error = str(exc)
+        return result
+    result.model_used = True
+    result.model_name = provider.model
+    return result
