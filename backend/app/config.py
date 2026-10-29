@@ -13,6 +13,13 @@ class Settings(BaseSettings):
     queue_name: str = "repopilot"
     workspace_dir: Path = Path(".workspaces")
 
+    sandbox_image: str = "repopilot-sandbox:py311"
+    sandbox_timeout_seconds: int = 120
+    sandbox_memory: str = "512m"
+    sandbox_cpus: float = 1.0
+    sandbox_pids_limit: int = 128
+    sandbox_output_limit_bytes: int = 200_000
+
     github_api_url: str = "https://api.github.com"
     github_clone_base: str = "https://github.com"
     github_app_id: str = ""

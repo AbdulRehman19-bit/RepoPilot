@@ -14,3 +14,13 @@ The differentiator is **reproducibility and verification**, not just code genera
 ## Status
 
 Work in progress. See `docs/plan.md`.
+
+## Sandbox image
+
+Untrusted code (a repository's tests, proposed patches) only ever runs inside a locked-down container. Build the image once:
+
+```bash
+docker build -t repopilot-sandbox:py311 docker/sandbox
+```
+
+Containers run with no network, a read-only root filesystem, a non-root user, no capabilities, and CPU/memory/process/time/output limits. The sandbox tests (`backend/tests/test_sandbox.py`) are skipped automatically if the image isn't built.
