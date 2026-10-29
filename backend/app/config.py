@@ -29,6 +29,10 @@ class Settings(BaseSettings):
     llm_temperature: float = 0.1
     patch_max_attempts: int = 3
 
+    # Shared secret for the API. When empty the API is open (local development only), and the
+    # approval endpoints, which write to GitHub, refuse to work.
+    api_token: str = ""
+
     github_api_url: str = "https://api.github.com"
     github_clone_base: str = "https://github.com"
     github_app_id: str = ""

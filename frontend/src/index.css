@@ -96,3 +96,64 @@ main {
   color: GrayText;
   user-select: none;
 }
+
+.step {
+  margin: 0.5rem 0;
+}
+
+.patch {
+  border: 1px solid color-mix(in srgb, currentColor 20%, transparent);
+  border-radius: 6px;
+  padding: 0.5rem 1rem;
+  margin: 1rem 0;
+}
+
+.diff {
+  overflow-x: auto;
+  font-size: 0.8rem;
+  padding: 0.5rem 0;
+  border: 1px solid color-mix(in srgb, currentColor 15%, transparent);
+  border-radius: 4px;
+}
+
+.diff div {
+  padding: 0 0.75rem;
+  white-space: pre;
+}
+
+.diff .add {
+  background: color-mix(in srgb, seagreen 22%, transparent);
+}
+
+.diff .del {
+  background: color-mix(in srgb, crimson 22%, transparent);
+}
+
+.results {
+  border-collapse: collapse;
+  margin: 0.5rem 0;
+}
+
+.results th,
+.results td {
+  padding: 0.25rem 0.75rem;
+  text-align: left;
+  border-bottom: 1px solid color-mix(in srgb, currentColor 15%, transparent);
+}
+
+.review {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  align-items: center;
+  margin: 0.75rem 0;
+}
+
+.review .meta {
+  flex-basis: 100%;
+  margin: 0;
+}
+
+.badge.verified {
+  background: color-mix(in srgb, seagreen 25%, transparent);
+}

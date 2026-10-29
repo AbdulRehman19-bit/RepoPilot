@@ -189,3 +189,14 @@ class Patch(TimestampMixin, Base):
     edits: Mapped[list] = mapped_column(JSONB, default=list)
     attempts: Mapped[list] = mapped_column(JSONB, default=list)
     error: Mapped[str | None] = mapped_column(Text)
+
+    # Human review. review_status is None until someone decides; the pr_* fields are set once
+    # a draft pull request exists.
+    review_status: Mapped[str | None] = mapped_column(String(16))  # "approved" | "rejected"
+    reviewer: Mapped[str | None] = mapped_column(String(255))
+    review_note: Mapped[str | None] = mapped_column(Text)
+    reviewed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    branch_name: Mapped[str | None] = mapped_column(String(255))
+    pr_number: Mapped[int | None] = mapped_column(Integer)
+    pr_url: Mapped[str | None] = mapped_column(String(1024))
+    pr_error: Mapped[str | None] = mapped_column(Text)

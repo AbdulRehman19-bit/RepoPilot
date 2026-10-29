@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react'
+import PatchReview from './PatchReview'
 import {
   explainIssue,
   fetchIssues,
@@ -149,6 +150,7 @@ export default function IssueInvestigator() {
           )}
         </>
       )}
+      {selected !== null && <PatchReview key={selected} issueId={selected} />}
     </section>
   )
 }

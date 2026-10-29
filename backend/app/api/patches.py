@@ -1,19 +1,31 @@
+from datetime import UTC, datetime
 from typing import Annotated, Any
 
+import httpx
 from fastapi import APIRouter, Depends, HTTPException
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from app.api.security import require_approvals_enabled
 from app.db import get_session
+from app.github.pulls import (
+    GitHubError,
+    PatchMismatch,
+    StaleBase,
+    build_pr_body,
+    get_github_client,
+    open_draft_pr,
+)
 from app.llm.factory import get_provider
-from app.models import Issue, Patch, TestExecution
+from app.models import Issue, Patch, Repository, TestExecution
 from app.worker.queue import enqueue_patch
 
 router = APIRouter(tags=["patches"])
 
 SessionDep = Annotated[Session, Depends(get_session)]
 ACTIVE = ("queued", "running")
+OUTPUT_TAIL_CHARS = 1500
 
 
 class PatchOut(BaseModel):
@@ -28,13 +40,43 @@ class PatchOut(BaseModel):
     diff: str | None
     attempts: list[dict[str, Any]]
     error: str | None
+    # What a reviewer needs to decide: the failure before, and the results after.
+    before: dict[str, Any] | None
+    after: dict[str, Any] | None
+    review_status: str | None
+    reviewer: str | None
+    review_note: str | None
+    branch_name: str | None
+    pr_number: int | None
+    pr_url: str | None
+    pr_error: str | None
 
 
 class PatchIn(BaseModel):
     reproduction_id: int | None = None
 
 
-def _out(patch: Patch) -> PatchOut:
+class ReviewIn(BaseModel):
+    reviewer: str | None = Field(default=None, max_length=100)
+    note: str | None = Field(default=None, max_length=1000)
+
+
+def _out(patch: Patch, session: Session) -> PatchOut:
+    reproduction = (
+        session.get(TestExecution, patch.reproduction_id) if patch.reproduction_id else None
+    )
+    before = None
+    if reproduction is not None:
+        before = {
+            "selectors": reproduction.selectors,
+            "failing": [f["node_id"] for f in reproduction.failures or []],
+            "output": (reproduction.output or "")[-OUTPUT_TAIL_CHARS:],
+        }
+    verified = next((a for a in patch.attempts or [] if a.get("outcome") == "verified"), None)
+    after = (
+        {"targeted": verified.get("targeted"), "full": verified.get("full")} if verified else None
+    )
+
     return PatchOut(
         id=patch.id,
         issue_id=patch.issue_id,
@@ -47,6 +89,15 @@ def _out(patch: Patch) -> PatchOut:
         diff=patch.diff,
         attempts=patch.attempts or [],
         error=patch.error,
+        before=before,
+        after=after,
+        review_status=patch.review_status,
+        reviewer=patch.reviewer,
+        review_note=patch.review_note,
+        branch_name=patch.branch_name,
+        pr_number=patch.pr_number,
+        pr_url=patch.pr_url,
+        pr_error=patch.pr_error,
     )
 
 
@@ -107,7 +158,7 @@ def start_patch(issue_id: int, session: SessionDep, body: PatchIn | None = None)
     except Exception as exc:  # noqa: BLE001 - surface any queue failure on the record
         patch.status, patch.error = "error", f"could not enqueue patch job: {exc}"
         session.commit()
-    return _out(patch)
+    return _out(patch, session)
 
 
 @router.get("/patches/{patch_id}")
@@ -115,7 +166,7 @@ def get_patch(patch_id: int, session: SessionDep) -> PatchOut:
     patch = session.get(Patch, patch_id)
     if patch is None:
         raise HTTPException(status_code=404, detail="patch not found")
-    return _out(patch)
+    return _out(patch, session)
 
 
 @router.get("/issues/{issue_id}/patches")
@@ -123,4 +174,116 @@ def list_patches(issue_id: int, session: SessionDep) -> list[PatchOut]:
     rows = session.scalars(
         select(Patch).where(Patch.issue_id == issue_id).order_by(Patch.id.desc()).limit(20)
     )
-    return [_out(row) for row in rows]
+    return [_out(row, session) for row in rows]
+
+
+# --- Human review and pull request creation -----------------------------------------------------
+
+
+def _locked_patch(session: Session, patch_id: int) -> Patch:
+    # Row lock: two reviewers clicking at once must not open two pull requests.
+    patch = session.get(Patch, patch_id, with_for_update=True)
+    if patch is None:
+        raise HTTPException(status_code=404, detail="patch not found")
+    return patch
+
+
+def _open_pull_request(session: Session, patch: Patch) -> PatchOut:
+    repo = session.get(Repository, patch.repository_id)
+    issue = session.get(Issue, patch.issue_id)
+    reproduction = session.get(TestExecution, patch.reproduction_id)
+
+    def fail(message: str, status: int) -> HTTPException:
+        patch.pr_error = message
+        session.commit()
+        return HTTPException(status_code=status, detail=message)
+
+    if not repo.installation_id:
+        raise fail("the repository is not connected to the GitHub App", 409)
+    if not patch.commit_sha or not patch.diff:
+        raise fail("the patch has no recorded base commit or diff", 409)
+
+    try:
+        gh = get_github_client(repo.installation_id)
+        pr = open_draft_pr(
+            gh,
+            full_name=repo.full_name,
+            base_branch=repo.default_branch,
+            base_sha=patch.commit_sha,
+            edits=patch.edits,
+            verified_diff=patch.diff,
+            protected={s.split("::")[0] for s in reproduction.selectors},
+            issue_number=issue.number,
+            patch_id=patch.id,
+            title=f"Fix #{issue.number}: {issue.title}"[:120],
+            body=build_pr_body(
+                issue_number=issue.number,
+                issue_title=issue.title,
+                explanation=patch.explanation or "",
+                attempts=patch.attempts or [],
+                before_failing=[f["node_id"] for f in reproduction.failures or []],
+                reviewer=patch.reviewer,
+                note=patch.review_note,
+            ),
+        )
+    except (StaleBase, PatchMismatch) as exc:
+        raise fail(str(exc), 409) from exc
+    except (GitHubError, httpx.HTTPError, RuntimeError, OSError) as exc:
+        raise fail(f"could not open the pull request: {exc}", 502) from exc
+
+    patch.pr_url, patch.pr_number, patch.branch_name, patch.pr_error = (
+        pr.url,
+        pr.number,
+        pr.branch,
+        None,
+    )
+    session.commit()
+    return _out(patch, session)
+
+
+@router.post("/patches/{patch_id}/approve", dependencies=[Depends(require_approvals_enabled)])
+def approve(patch_id: int, session: SessionDep, body: ReviewIn | None = None) -> PatchOut:
+    """Approve a verified patch and open a draft pull request for it."""
+    patch = _locked_patch(session, patch_id)
+    if patch.status != "verified":
+        raise HTTPException(status_code=409, detail="only verified patches can be approved")
+    if patch.review_status == "rejected":
+        raise HTTPException(status_code=409, detail="this patch was rejected")
+    if patch.pr_url:
+        raise HTTPException(status_code=409, detail="a pull request was already opened")
+
+    if patch.review_status is None:
+        patch.review_status = "approved"
+        patch.reviewer = body.reviewer if body else None
+        patch.review_note = body.note if body else None
+        patch.reviewed_at = datetime.now(UTC)
+        session.commit()  # keep the decision even if GitHub fails; retry with /open-pr
+        patch = _locked_patch(session, patch_id)
+    return _open_pull_request(session, patch)
+
+
+@router.post("/patches/{patch_id}/open-pr", dependencies=[Depends(require_approvals_enabled)])
+def retry_open_pr(patch_id: int, session: SessionDep) -> PatchOut:
+    """Retry opening the pull request for an already-approved patch."""
+    patch = _locked_patch(session, patch_id)
+    if patch.review_status != "approved":
+        raise HTTPException(status_code=409, detail="the patch has not been approved")
+    if patch.pr_url:
+        raise HTTPException(status_code=409, detail="a pull request was already opened")
+    return _open_pull_request(session, patch)
+
+
+@router.post("/patches/{patch_id}/reject", dependencies=[Depends(require_approvals_enabled)])
+def reject(patch_id: int, session: SessionDep, body: ReviewIn | None = None) -> PatchOut:
+    patch = _locked_patch(session, patch_id)
+    if patch.status != "verified":
+        raise HTTPException(status_code=409, detail="only verified patches can be reviewed")
+    if patch.review_status is not None:
+        raise HTTPException(status_code=409, detail=f"this patch was already {patch.review_status}")
+
+    patch.review_status = "rejected"
+    patch.reviewer = body.reviewer if body else None
+    patch.review_note = body.note if body else None
+    patch.reviewed_at = datetime.now(UTC)
+    session.commit()
+    return _out(patch, session)

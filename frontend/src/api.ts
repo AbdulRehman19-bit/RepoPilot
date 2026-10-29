@@ -15,8 +15,31 @@ export interface Repository {
   file_count: number
 }
 
-async function request<T>(path: string, init?: RequestInit): Promise<T> {
-  const response = await fetch(`/api${path}`, init)
+const TOKEN_KEY = 'repopilot_api_token'
+
+export function getToken(): string {
+  try {
+    return sessionStorage.getItem(TOKEN_KEY) ?? ''
+  } catch {
+    return ''
+  }
+}
+
+export function setToken(token: string): void {
+  try {
+    if (token) sessionStorage.setItem(TOKEN_KEY, token)
+    else sessionStorage.removeItem(TOKEN_KEY)
+  } catch {
+    // Storage can be blocked (private windows); the token then lasts until reload only.
+  }
+}
+
+async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
+  const token = getToken()
+  const headers = new Headers(init.headers)
+  if (token) headers.set('Authorization', `Bearer ${token}`)
+  if (init.body) headers.set('Content-Type', 'application/json')
+  const response = await fetch(`/api${path}`, { ...init, headers })
   if (!response.ok) {
     const detail = await response.json().then((body) => body.detail).catch(() => null)
     throw new Error(detail ?? `API returned ${response.status}`)
@@ -81,3 +104,63 @@ export interface Explained extends Retrieval {
 
 export const explainIssue = (id: number) =>
   request<Explained>(`/issues/${id}/explain`, { method: 'POST' })
+
+export interface Execution {
+  id: number
+  status: string
+  kind: string
+  selectors: string[]
+  failures: { node_id: string; message: string }[]
+  error: string | null
+  reproduced: boolean | null
+}
+
+export interface Attempt {
+  number: number
+  explanation: string
+  outcome: string
+  detail: string
+}
+
+export interface TestSummary {
+  passed: number
+  failed: number
+}
+
+export interface Patch {
+  id: number
+  issue_id: number
+  status: string
+  model_name: string | null
+  explanation: string | null
+  diff: string | null
+  attempts: Attempt[]
+  error: string | null
+  before: { selectors: string[]; failing: string[]; output: string } | null
+  after: { targeted: TestSummary | null; full: TestSummary | null } | null
+  review_status: 'approved' | 'rejected' | null
+  reviewer: string | null
+  review_note: string | null
+  pr_url: string | null
+  pr_error: string | null
+}
+
+export const reproduceIssue = (id: number) =>
+  request<Execution>(`/issues/${id}/reproduce`, { method: 'POST' })
+export const fetchExecution = (id: number) => request<Execution>(`/executions/${id}`)
+export const startPatch = (issueId: number) =>
+  request<Patch>(`/issues/${issueId}/patch`, { method: 'POST' })
+export const fetchPatches = (issueId: number) => request<Patch[]>(`/issues/${issueId}/patches`)
+
+export interface Review {
+  reviewer?: string
+  note?: string
+}
+const review = (id: number, action: string, body?: Review) =>
+  request<Patch>(`/patches/${id}/${action}`, {
+    method: 'POST',
+    body: body ? JSON.stringify(body) : undefined,
+  })
+export const approvePatch = (id: number, body: Review) => review(id, 'approve', body)
+export const rejectPatch = (id: number, body: Review) => review(id, 'reject', body)
+export const retryOpenPr = (id: number) => review(id, 'open-pr')

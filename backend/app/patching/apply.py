@@ -2,10 +2,15 @@
 
 Models are unreliable at writing unified diffs with correct line numbers, so they propose
 exact-match edits instead and we generate the diff ourselves.
+
+The text-level core (`apply_to_texts`) is shared by the sandbox verification (which edits files
+on disk) and by pull request creation (which edits files fetched from GitHub), so both produce
+the identical diff.
 """
 
 import difflib
 import shutil
+from collections.abc import Iterable
 from dataclasses import dataclass
 from pathlib import Path, PurePosixPath
 
@@ -37,12 +42,20 @@ class AppliedPatch:
     changed_lines: int
 
 
-def is_protected(path: str, extra: set[str] = frozenset()) -> bool:
+@dataclass
+class AppliedTexts:
+    updated: dict[str, str]  # path -> new text, with "\n" line endings
+    diff: str
+    files: list[str]  # only the files that actually changed
+    changed_lines: int
+
+
+def is_protected(path: str, extra: Iterable[str] = ()) -> bool:
     """Tests and test infrastructure may not be edited: a fix must not 'pass' by changing them."""
     posix = PurePosixPath(path)
     name = posix.name
     return (
-        path in extra
+        path in set(extra)
         or name in PROTECTED_NAMES
         or name.startswith("test_")
         or name.endswith("_test.py")
@@ -50,7 +63,8 @@ def is_protected(path: str, extra: set[str] = frozenset()) -> bool:
     )
 
 
-def _resolve(root: Path, raw: str, protected: set[str]) -> tuple[str, Path]:
+def normalize_edit_path(raw: str, protected: Iterable[str] = ()) -> str:
+    """Validate a path from the model without touching the filesystem."""
     normalized = raw.replace("\\", "/").strip()
     posix = PurePosixPath(normalized)
     if (
@@ -65,40 +79,39 @@ def _resolve(root: Path, raw: str, protected: set[str]) -> tuple[str, Path]:
         raise PatchError(f"only Python files can be edited, not {raw!r}")
     if is_protected(normalized, protected):
         raise PatchError(f"{raw!r} is a test or test-infrastructure file and cannot be edited")
+    return normalized
 
-    target = root / normalized
-    if target.is_symlink() or not target.is_file():
-        raise PatchError(f"{raw!r} does not exist in the repository")
-    if root.resolve() not in target.resolve().parents:
-        raise PatchError(f"path {raw!r} escapes the repository")
-    return normalized, target
+
+def edit_paths(edits: list[Edit], protected: Iterable[str] = ()) -> list[str]:
+    """The distinct, validated paths the edits touch, in order of first use."""
+    if not edits:
+        raise PatchError("the model proposed no edits")
+    protected = set(protected)
+    paths = list(dict.fromkeys(normalize_edit_path(e.path, protected) for e in edits))
+    if len(paths) > MAX_FILES:
+        raise PatchError(f"too many files edited (limit {MAX_FILES})")
+    return paths
 
 
 def _trim_blank_edges(text: str) -> str:
     return text.strip("\r\n")
 
 
-def apply_edits(root: Path, edits: list[Edit], protected: set[str] = frozenset()) -> AppliedPatch:
-    """Apply `edits` to files under `root` in place, returning the resulting unified diff."""
-    if not edits:
-        raise PatchError("the model proposed no edits")
-
-    originals: dict[str, str] = {}
-    updated: dict[str, str] = {}
-    newline: dict[str, str] = {}
-    targets: dict[str, Path] = {}
+def apply_to_texts(
+    texts: dict[str, str], edits: list[Edit], protected: Iterable[str] = ()
+) -> AppliedTexts:
+    """Apply `edits` to in-memory file contents (LF line endings) and build the unified diff."""
+    protected = set(protected)
+    paths = edit_paths(edits, protected)
+    missing = [path for path in paths if path not in texts]
+    if missing:
+        raise PatchError(f"{missing[0]!r} does not exist in the repository")
+    updated = {path: texts[path] for path in paths}
 
     for edit in edits:
         if len(edit.search) > MAX_EDIT_CHARS or len(edit.replace) > MAX_EDIT_CHARS:
             raise PatchError("an edit is too large; make smaller, targeted edits")
-        path, target = _resolve(root, edit.path, set(protected))
-        if path not in originals:
-            raw = target.read_bytes().decode("utf-8")
-            newline[path] = "\r\n" if "\r\n" in raw else "\n"
-            originals[path] = updated[path] = raw.replace("\r\n", "\n")
-            targets[path] = target
-            if len(originals) > MAX_FILES:
-                raise PatchError(f"too many files edited (limit {MAX_FILES})")
+        path = normalize_edit_path(edit.path, protected)
 
         search = _trim_blank_edges(edit.search.replace("\r\n", "\n"))
         replace = _trim_blank_edges(edit.replace.replace("\r\n", "\n"))
@@ -117,9 +130,10 @@ def apply_edits(root: Path, edits: list[Edit], protected: set[str] = frozenset()
         updated[path] = updated[path].replace(search, replace, 1)
 
     diff_parts: list[str] = []
+    changed_files: list[str] = []
     changed = 0
-    for path, before in originals.items():
-        after = updated[path]
+    for path in paths:
+        before, after = texts[path], updated[path]
         if before == after:
             continue
         lines = list(
@@ -134,18 +148,38 @@ def apply_edits(root: Path, edits: list[Edit], protected: set[str] = frozenset()
             1 for line in lines if line[:1] in "+-" and not line.startswith(("+++", "---"))
         )
         diff_parts.append("".join(line if line.endswith("\n") else line + "\n" for line in lines))
+        changed_files.append(path)
     if not diff_parts:
         raise PatchError("the edits do not change any file")
     if changed > MAX_CHANGED_LINES:
         raise PatchError(f"patch is too large ({changed} changed lines, limit {MAX_CHANGED_LINES})")
+    return AppliedTexts(updated, "".join(diff_parts), changed_files, changed)
 
-    for path, text in updated.items():
-        if text != originals[path]:
-            data = text.replace("\n", newline[path]).encode("utf-8")
-            targets[path].write_bytes(data)
-    return AppliedPatch(
-        "".join(diff_parts), [p for p in originals if updated[p] != originals[p]], changed
-    )
+
+def _read_file(root: Path, path: str) -> tuple[Path, str, str]:
+    target = root / path
+    if target.is_symlink() or not target.is_file():
+        raise PatchError(f"{path!r} does not exist in the repository")
+    if root.resolve() not in target.resolve().parents:
+        raise PatchError(f"path {path!r} escapes the repository")
+    raw = target.read_bytes().decode("utf-8")
+    newline = "\r\n" if "\r\n" in raw else "\n"
+    return target, newline, raw.replace("\r\n", "\n")
+
+
+def apply_edits(root: Path, edits: list[Edit], protected: Iterable[str] = ()) -> AppliedPatch:
+    """Apply `edits` to files under `root` in place, returning the resulting unified diff.
+
+    Nothing is written unless every edit applies, and original line endings are preserved.
+    """
+    protected = set(protected)
+    loaded = {path: _read_file(root, path) for path in edit_paths(edits, protected)}
+    applied = apply_to_texts({p: text for p, (_, _, text) in loaded.items()}, edits, protected)
+
+    for path in applied.files:
+        target, newline, _ = loaded[path]
+        target.write_bytes(applied.updated[path].replace("\n", newline).encode("utf-8"))
+    return AppliedPatch(applied.diff, applied.files, applied.changed_lines)
 
 
 def make_candidate(checkout: Path, destination: Path) -> Path:
