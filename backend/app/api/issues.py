@@ -5,11 +5,12 @@ from pydantic import BaseModel
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from app.api.security import Principal, PrincipalDep
 from app.db import get_session
 from app.llm.base import LLMError
 from app.llm.explain import ModelExplanation, explain_with_model
 from app.llm.factory import get_provider
-from app.models import Issue
+from app.models import Issue, Repository
 from app.retrieval.context import explain
 from app.retrieval.service import Investigation, investigate
 
@@ -81,10 +82,13 @@ def _issue_out(issue: Issue) -> IssueOut:
     )
 
 
-def _investigate(session: Session, issue_id: int, limit: int, budget_tokens: int) -> Investigation:
+def _investigate(
+    session: Session, principal: Principal, issue_id: int, limit: int, budget_tokens: int
+) -> Investigation:
     issue = session.get(Issue, issue_id)
     if issue is None:
         raise HTTPException(status_code=404, detail="issue not found")
+    principal.require(issue.repository)
     if issue.repository.index_status != "ready":
         raise HTTPException(status_code=409, detail="repository has not been indexed yet")
     return investigate(session, issue, limit, budget_tokens)
@@ -114,8 +118,12 @@ def _retrieval_out(found: Investigation) -> dict:
 
 
 @router.get("")
-def list_issues(session: SessionDep) -> list[IssueOut]:
-    issues = session.scalars(select(Issue).order_by(Issue.updated_at.desc()).limit(100))
+def list_issues(session: SessionDep, principal: PrincipalDep) -> list[IssueOut]:
+    query = select(Issue).order_by(Issue.updated_at.desc()).limit(100)
+    visible = principal.readable_ids()
+    if visible is not None:
+        query = query.join(Repository).where(Repository.github_id.in_(visible))
+    issues = session.scalars(query)
     return [_issue_out(issue) for issue in issues]
 
 
@@ -123,21 +131,25 @@ def list_issues(session: SessionDep) -> list[IssueOut]:
 def retrieve(
     issue_id: int,
     session: SessionDep,
+    principal: PrincipalDep,
     limit: Annotated[int, Query(ge=1, le=25)] = 8,
     budget_tokens: Annotated[int, Query(ge=500, le=16000)] = 3000,
 ) -> RetrievalOut:
-    return RetrievalOut(**_retrieval_out(_investigate(session, issue_id, limit, budget_tokens)))
+    return RetrievalOut(
+        **_retrieval_out(_investigate(session, principal, issue_id, limit, budget_tokens))
+    )
 
 
 @router.post("/{issue_id}/explain")
 def explain_issue(
     issue_id: int,
     session: SessionDep,
+    principal: PrincipalDep,
     limit: Annotated[int, Query(ge=1, le=25)] = 6,
     budget_tokens: Annotated[int, Query(ge=500, le=8000)] = 2500,
 ) -> ExplainOut:
     """Retrieval plus a model-written analysis; falls back to retrieval alone if no model works."""
-    found = _investigate(session, issue_id, limit, budget_tokens)
+    found = _investigate(session, principal, issue_id, limit, budget_tokens)
     result = ExplainOut(
         **_retrieval_out(found),
         model_used=False,

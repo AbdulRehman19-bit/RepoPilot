@@ -200,3 +200,19 @@ class Patch(TimestampMixin, Base):
     pr_number: Mapped[int | None] = mapped_column(Integer)
     pr_url: Mapped[str | None] = mapped_column(String(1024))
     pr_error: Mapped[str | None] = mapped_column(Text)
+
+
+class LoginSession(Base):
+    """A signed-in browser session. Only a hash of the cookie value is stored, and GitHub's user
+    token is discarded at login: what the user may touch is frozen into `access` (GitHub
+    repository id -> "read" | "write") until the session expires."""
+
+    __tablename__ = "login_sessions"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    token_hash: Mapped[str] = mapped_column(String(64), unique=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"))
+    login: Mapped[str] = mapped_column(String(255))
+    access: Mapped[dict] = mapped_column(JSONB, default=dict)
+    expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())

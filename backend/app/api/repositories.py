@@ -5,6 +5,7 @@ from pydantic import BaseModel
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
+from app.api.security import PrincipalDep
 from app.db import get_session
 from app.models import IndexedFile, Repository
 from app.worker.queue import enqueue_index
@@ -37,26 +38,31 @@ def _to_out(repo: Repository, file_count: int) -> RepositoryOut:
 
 
 @router.get("")
-def list_repositories(session: SessionDep) -> list[RepositoryOut]:
+def list_repositories(session: SessionDep, principal: PrincipalDep) -> list[RepositoryOut]:
     counts = (
         select(IndexedFile.repository_id, func.count().label("n"))
         .group_by(IndexedFile.repository_id)
         .subquery()
     )
-    rows = session.execute(
+    query = (
         select(Repository, func.coalesce(counts.c.n, 0))
         .outerjoin(counts, counts.c.repository_id == Repository.id)
         .where(Repository.installation_id.is_not(None))
         .order_by(Repository.full_name)
-    ).all()
+    )
+    visible = principal.readable_ids()
+    if visible is not None:
+        query = query.where(Repository.github_id.in_(visible))
+    rows = session.execute(query).all()
     return [_to_out(repo, count) for repo, count in rows]
 
 
 @router.post("/{repo_id}/reindex", status_code=202)
-def reindex(repo_id: int, session: SessionDep) -> RepositoryOut:
+def reindex(repo_id: int, session: SessionDep, principal: PrincipalDep) -> RepositoryOut:
     repo = session.get(Repository, repo_id)
     if repo is None:
         raise HTTPException(status_code=404, detail="repository not found")
+    principal.require(repo, write=True)
     if repo.index_status in ("queued", "indexing"):
         raise HTTPException(status_code=409, detail="indexing already in progress")
 

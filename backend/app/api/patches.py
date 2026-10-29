@@ -7,7 +7,7 @@ from pydantic import BaseModel, Field
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from app.api.security import require_approvals_enabled
+from app.api.security import Principal, PrincipalDep, require_approvals_enabled
 from app.db import get_session
 from app.github.pulls import (
     GitHubError,
@@ -111,11 +111,14 @@ def _reproduced(execution: TestExecution) -> bool:
 
 
 @router.post("/issues/{issue_id}/patch", status_code=202)
-def start_patch(issue_id: int, session: SessionDep, body: PatchIn | None = None) -> PatchOut:
+def start_patch(
+    issue_id: int, session: SessionDep, principal: PrincipalDep, body: PatchIn | None = None
+) -> PatchOut:
     issue = session.get(Issue, issue_id)
     if issue is None:
         raise HTTPException(status_code=404, detail="issue not found")
     repo = issue.repository
+    principal.require(repo, write=True)
     if repo.index_status != "ready":
         raise HTTPException(status_code=409, detail="repository has not been indexed yet")
     if get_provider() is None:
@@ -162,15 +165,20 @@ def start_patch(issue_id: int, session: SessionDep, body: PatchIn | None = None)
 
 
 @router.get("/patches/{patch_id}")
-def get_patch(patch_id: int, session: SessionDep) -> PatchOut:
+def get_patch(patch_id: int, session: SessionDep, principal: PrincipalDep) -> PatchOut:
     patch = session.get(Patch, patch_id)
     if patch is None:
         raise HTTPException(status_code=404, detail="patch not found")
+    principal.require(session.get(Repository, patch.repository_id))
     return _out(patch, session)
 
 
 @router.get("/issues/{issue_id}/patches")
-def list_patches(issue_id: int, session: SessionDep) -> list[PatchOut]:
+def list_patches(issue_id: int, session: SessionDep, principal: PrincipalDep) -> list[PatchOut]:
+    issue = session.get(Issue, issue_id)
+    if issue is None:
+        raise HTTPException(status_code=404, detail="issue not found")
+    principal.require(issue.repository)
     rows = session.scalars(
         select(Patch).where(Patch.issue_id == issue_id).order_by(Patch.id.desc()).limit(20)
     )
@@ -180,12 +188,18 @@ def list_patches(issue_id: int, session: SessionDep) -> list[PatchOut]:
 # --- Human review and pull request creation -----------------------------------------------------
 
 
-def _locked_patch(session: Session, patch_id: int) -> Patch:
+def _locked_patch(session: Session, principal: Principal, patch_id: int) -> Patch:
     # Row lock: two reviewers clicking at once must not open two pull requests.
     patch = session.get(Patch, patch_id, with_for_update=True)
     if patch is None:
         raise HTTPException(status_code=404, detail="patch not found")
+    principal.require(session.get(Repository, patch.repository_id), write=True)
     return patch
+
+
+def _reviewer(principal: Principal, body: "ReviewIn | None") -> str | None:
+    """A signed-in reviewer is who GitHub says they are; a typed-in name is only for tokens."""
+    return principal.login or (body.reviewer if body else None)
 
 
 def _open_pull_request(session: Session, patch: Patch) -> PatchOut:
@@ -242,9 +256,11 @@ def _open_pull_request(session: Session, patch: Patch) -> PatchOut:
 
 
 @router.post("/patches/{patch_id}/approve", dependencies=[Depends(require_approvals_enabled)])
-def approve(patch_id: int, session: SessionDep, body: ReviewIn | None = None) -> PatchOut:
+def approve(
+    patch_id: int, session: SessionDep, principal: PrincipalDep, body: ReviewIn | None = None
+) -> PatchOut:
     """Approve a verified patch and open a draft pull request for it."""
-    patch = _locked_patch(session, patch_id)
+    patch = _locked_patch(session, principal, patch_id)
     if patch.status != "verified":
         raise HTTPException(status_code=409, detail="only verified patches can be approved")
     if patch.review_status == "rejected":
@@ -254,18 +270,18 @@ def approve(patch_id: int, session: SessionDep, body: ReviewIn | None = None) ->
 
     if patch.review_status is None:
         patch.review_status = "approved"
-        patch.reviewer = body.reviewer if body else None
+        patch.reviewer = _reviewer(principal, body)
         patch.review_note = body.note if body else None
         patch.reviewed_at = datetime.now(UTC)
         session.commit()  # keep the decision even if GitHub fails; retry with /open-pr
-        patch = _locked_patch(session, patch_id)
+        patch = _locked_patch(session, principal, patch_id)
     return _open_pull_request(session, patch)
 
 
 @router.post("/patches/{patch_id}/open-pr", dependencies=[Depends(require_approvals_enabled)])
-def retry_open_pr(patch_id: int, session: SessionDep) -> PatchOut:
+def retry_open_pr(patch_id: int, session: SessionDep, principal: PrincipalDep) -> PatchOut:
     """Retry opening the pull request for an already-approved patch."""
-    patch = _locked_patch(session, patch_id)
+    patch = _locked_patch(session, principal, patch_id)
     if patch.review_status != "approved":
         raise HTTPException(status_code=409, detail="the patch has not been approved")
     if patch.pr_url:
@@ -274,15 +290,17 @@ def retry_open_pr(patch_id: int, session: SessionDep) -> PatchOut:
 
 
 @router.post("/patches/{patch_id}/reject", dependencies=[Depends(require_approvals_enabled)])
-def reject(patch_id: int, session: SessionDep, body: ReviewIn | None = None) -> PatchOut:
-    patch = _locked_patch(session, patch_id)
+def reject(
+    patch_id: int, session: SessionDep, principal: PrincipalDep, body: ReviewIn | None = None
+) -> PatchOut:
+    patch = _locked_patch(session, principal, patch_id)
     if patch.status != "verified":
         raise HTTPException(status_code=409, detail="only verified patches can be reviewed")
     if patch.review_status is not None:
         raise HTTPException(status_code=409, detail=f"this patch was already {patch.review_status}")
 
     patch.review_status = "rejected"
-    patch.reviewer = body.reviewer if body else None
+    patch.reviewer = _reviewer(principal, body)
     patch.review_note = body.note if body else None
     patch.reviewed_at = datetime.now(UTC)
     session.commit()

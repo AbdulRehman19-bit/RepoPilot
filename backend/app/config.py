@@ -42,6 +42,16 @@ class Settings(BaseSettings):
     github_private_key_path: Path | None = None
     github_webhook_secret: str = ""
 
+    # "Sign in with GitHub" (the GitHub App's user authorization). When the client id is empty,
+    # login is unavailable and the shared API token (or open dev mode) is the only way in.
+    github_client_id: str = ""
+    github_client_secret: str = ""
+    github_oauth_url: str = "https://github.com"
+    frontend_url: str = "http://localhost:5173"
+    session_ttl_hours: int = 8
+    # Secure cookies need HTTPS; browsers exempt localhost, so the default is safe in development.
+    session_cookie_secure: bool = True
+
     def github_private_key(self) -> str:
         if not self.github_private_key_path:
             raise RuntimeError("REPOPILOT_GITHUB_PRIVATE_KEY_PATH is not set")

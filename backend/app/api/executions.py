@@ -5,6 +5,7 @@ from pydantic import BaseModel
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from app.api.security import PrincipalDep
 from app.db import get_session
 from app.models import Issue, Repository, TestExecution
 from app.sandbox.pytest_runner import InvalidSelector, extract_node_ids, validate_selectors
@@ -109,18 +110,22 @@ def _start(
 
 
 @router.post("/repositories/{repo_id}/baseline", status_code=202)
-def run_baseline(repo_id: int, session: SessionDep) -> ExecutionOut:
+def run_baseline(repo_id: int, session: SessionDep, principal: PrincipalDep) -> ExecutionOut:
     repo = session.get(Repository, repo_id)
     if repo is None:
         raise HTTPException(status_code=404, detail="repository not found")
+    principal.require(repo, write=True)
     return _start(session, repo, "baseline", [], None)
 
 
 @router.post("/issues/{issue_id}/reproduce", status_code=202)
-def reproduce(issue_id: int, session: SessionDep, body: ReproduceIn | None = None) -> ExecutionOut:
+def reproduce(
+    issue_id: int, session: SessionDep, principal: PrincipalDep, body: ReproduceIn | None = None
+) -> ExecutionOut:
     issue = session.get(Issue, issue_id)
     if issue is None:
         raise HTTPException(status_code=404, detail="issue not found")
+    principal.require(issue.repository, write=True)
 
     selectors = (body.selectors if body and body.selectors else None) or extract_node_ids(
         f"{issue.title}\n{issue.body}"
@@ -138,15 +143,24 @@ def reproduce(issue_id: int, session: SessionDep, body: ReproduceIn | None = Non
 
 
 @router.get("/executions/{execution_id}")
-def get_execution(execution_id: int, session: SessionDep) -> ExecutionDetailOut:
+def get_execution(
+    execution_id: int, session: SessionDep, principal: PrincipalDep
+) -> ExecutionDetailOut:
     execution = session.get(TestExecution, execution_id)
     if execution is None:
         raise HTTPException(status_code=404, detail="test run not found")
+    principal.require(session.get(Repository, execution.repository_id))
     return ExecutionDetailOut(**_out(execution).model_dump(), output=execution.output)
 
 
 @router.get("/repositories/{repo_id}/executions")
-def list_executions(repo_id: int, session: SessionDep) -> list[ExecutionOut]:
+def list_executions(
+    repo_id: int, session: SessionDep, principal: PrincipalDep
+) -> list[ExecutionOut]:
+    repo = session.get(Repository, repo_id)
+    if repo is None:
+        raise HTTPException(status_code=404, detail="repository not found")
+    principal.require(repo)
     rows = session.scalars(
         select(TestExecution)
         .where(TestExecution.repository_id == repo_id)

@@ -30,7 +30,10 @@ against the code as of step 17. A control listed here has a test unless marked o
 | T2 | Replayed webhook (e.g. old `issues` event overwrites newer issue text) | Body-hash claim in Redis for 24 h; released if processing fails so GitHub's redelivery works | tested |
 | T3 | Oversized request exhausting memory/CPU | Webhook cap 5 MB (checked from `Content-Length` and again on the body); API cap 1 MB via `Content-Length` | tested |
 | T4 | Malformed but correctly signed payload causing 500s | JSON / shape errors return 400 / 422 and roll back | tested |
-| T5 | Unauthenticated API use | Bearer token, constant-time compare; approvals/PR creation disabled (503) without a token | tested |
+| T5 | Unauthenticated API use | Sign in with GitHub (random session cookie, HttpOnly, SameSite=Lax, only its hash stored) or the shared bearer token (constant-time compare); approvals/PR creation disabled (503) when neither is configured | tested |
+| T13 | A signed-in user reaches another team's repositories | Access map taken from GitHub at sign-in (repositories reachable by both the user and the app); every route checks it; unreachable repositories return 404, read-only ones 403 on anything that runs code or writes | tested |
+| T14 | Cross-site request forgery on cookie sessions | SameSite=Lax, plus state-changing requests must carry an `Origin` that matches the host; OAuth `state` is checked against a short-lived cookie | tested |
+| T15 | A reviewer is recorded under someone else's name | The recorded reviewer is the signed-in GitHub login; the request body is ignored for signed-in users | tested |
 | T6 | Repo code escaping the sandbox or reaching the network | No network, read-only root, `cap-drop ALL`, `no-new-privileges`, uid 1000, memory/CPU/pids/file-size/time limits, no host env, no Docker socket | tested with hostile cases (fork bomb, memory hog, hang, huge output, network) |
 | T7 | Secrets leaking into the UI, database, or model prompts through test output or error text | `redact()` on test output and on stored worker errors: GitHub tokens, PEM keys (even truncated), AWS key ids, JWTs, `Authorization` headers, URL credentials, our own configured secrets | tested |
 | T8 | Prompt injection in issue text or code | Issue/code are passed as delimited untrusted data, delimiters are neutralised, the model may only propose search/replace edits, never commands | tested |
@@ -50,8 +53,16 @@ against the code as of step 17. A control listed here has a test unless marked o
   committed to a repo are also in the copy the sandbox sees.
 - **Replay window is 24 h**, and the Redis claim fails open if Redis is down. GitHub sends no
   timestamp, so an older capture of a valid signed body can be replayed after the window.
-- **One shared API token** and no per-user authorisation: anyone holding the token can see every
-  connected repository's data and approve any patch. Real GitHub login is not built.
+- **Permissions are a snapshot.** A user's repository access is read from GitHub at sign-in and
+  kept for the session (8 hours by default). Removing someone's access on GitHub does not end
+  their session; ending it early means deleting the row in `login_sessions`.
+- **The shared API token is still a root key**: it reaches every repository and its holder is not
+  identified in audit fields. Leave it unset if scripts are not needed.
+- **Sign-in has not been exercised against real GitHub.** It is tested against a faithful fake of
+  the OAuth and REST endpoints; the first real login may surface differences (callback URL,
+  permission names).
+- **No organisation-level policy.** Any user with write access on GitHub can approve, including
+  the author of the issue; there is no "second reviewer" rule.
 - **No rate limiting.** An authenticated caller can queue unlimited jobs. `Content-Length`-less
   (chunked) API bodies are not size-capped at the app layer; put a reverse proxy in front.
 - **Source code goes to the model.** With the local Ollama provider it stays on the machine;

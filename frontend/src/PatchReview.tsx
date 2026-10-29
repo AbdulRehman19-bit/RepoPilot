@@ -154,7 +154,7 @@ function PatchCard({ patch, onChange }: { patch: Patch; onChange: () => void }) 
             Approving creates a branch and a <strong>draft</strong> pull request on GitHub. Nothing is
             merged.
           </p>
-          <input placeholder="Your name (optional)" value={reviewer} onChange={(e) => setReviewer(e.target.value)} />
+          <input placeholder="Your name (ignored when signed in)" value={reviewer} onChange={(e) => setReviewer(e.target.value)} />
           <input placeholder="Note for the PR (optional)" value={note} onChange={(e) => setNote(e.target.value)} />
           <button
             disabled={busy}

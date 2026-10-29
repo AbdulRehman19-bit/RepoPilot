@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { fetchHealth, getToken, setToken, type Health } from './api'
+import { fetchAuthConfig, fetchHealth, getToken, setToken, signOut, type AuthConfig, type Health } from './api'
 import IssueInvestigator from './IssueInvestigator'
 import RepositoryList from './RepositoryList'
 
@@ -22,15 +22,54 @@ function TokenField({ onApply }: { onApply: () => void }) {
   )
 }
 
+function Account({ auth, onChange }: { auth: AuthConfig; onChange: () => void }) {
+  if (auth.login) {
+    return (
+      <p className="meta">
+        Signed in as <strong>{auth.login}</strong>{' '}
+        <button
+          onClick={() =>
+            signOut()
+              .catch(() => undefined)
+              .finally(onChange)
+          }
+        >
+          Sign out
+        </button>
+      </p>
+    )
+  }
+  return (
+    <>
+      {auth.login_available && (
+        // A full-page navigation: GitHub redirects back here with the session cookie set.
+        <p>
+          <a href="/api/auth/login">Sign in with GitHub</a>
+        </p>
+      )}
+      {auth.token_required && <TokenField onApply={onChange} />}
+      {auth.open && (
+        <p className="meta">Development mode: no sign-in is configured, so approvals are disabled.</p>
+      )}
+    </>
+  )
+}
+
 export default function App() {
   const [health, setHealth] = useState<Health | null>(null)
+  const [auth, setAuth] = useState<AuthConfig | null>(null)
   const [error, setError] = useState<string | null>(null)
-  // Bumping this remounts the data views so they refetch with the newly entered token.
-  const [tokenVersion, setTokenVersion] = useState(0)
+  // Bumping this remounts the data views so they refetch after signing in or out.
+  const [version, setVersion] = useState(0)
 
   useEffect(() => {
     fetchHealth().then(setHealth).catch((e: Error) => setError(e.message))
   }, [])
+  useEffect(() => {
+    fetchAuthConfig().then(setAuth).catch((e: Error) => setError(e.message))
+  }, [version])
+
+  const canUse = auth !== null && (auth.open || auth.login !== null || getToken() !== '')
 
   return (
     <main>
@@ -40,9 +79,14 @@ export default function App() {
         API:{' '}
         {error ? `unreachable (${error})` : health ? `${health.status} (${health.environment})` : 'checking…'}
       </p>
-      <TokenField onApply={() => setTokenVersion((v) => v + 1)} />
-      <RepositoryList key={`repos-${tokenVersion}`} />
-      <IssueInvestigator key={`issues-${tokenVersion}`} />
+      {auth && <Account auth={auth} onChange={() => setVersion((v) => v + 1)} />}
+      {auth && !canUse && <p>Sign in to see your repositories.</p>}
+      {canUse && (
+        <>
+          <RepositoryList key={`repos-${version}`} />
+          <IssueInvestigator key={`issues-${version}`} />
+        </>
+      )}
     </main>
   )
 }

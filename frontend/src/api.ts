@@ -44,8 +44,18 @@ async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
     const detail = await response.json().then((body) => body.detail).catch(() => null)
     throw new Error(detail ?? `API returned ${response.status}`)
   }
-  return response.json()
+  return response.status === 204 ? (undefined as T) : response.json()
 }
+
+export interface AuthConfig {
+  login_available: boolean // GitHub sign-in is set up on the server
+  login: string | null // who is signed in, if anyone
+  token_required: boolean // the server also accepts a shared API token
+  open: boolean // nothing is configured: local development
+}
+
+export const fetchAuthConfig = () => request<AuthConfig>('/auth/config')
+export const signOut = () => request<void>('/auth/logout', { method: 'POST' })
 
 export const fetchHealth = () => request<Health>('/health')
 export const fetchRepositories = () => request<Repository[]>('/repositories')
