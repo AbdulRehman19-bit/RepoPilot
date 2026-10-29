@@ -28,3 +28,5 @@ testpaths = ["tests"]
 
 [tool.ruff]
 line-length = 100
+# The benchmark cases are deliberately buggy projects; they must not be linted or "fixed".
+extend-exclude = ["bench/cases", "bench/results"]

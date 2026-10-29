@@ -1,0 +1,15 @@
+{
+  "id": "money_misdirected_traceback",
+  "kind": "misdirected",
+  "description": "The traceback points at parse_amount, but the root cause is clean_number in another file.",
+  "issue": {
+    "title": "Entering 1,299.50 as an invoice amount crashes",
+    "body": "Adding an invoice line with the amount `$1,299.50` fails:\n\n```\nTraceback (most recent call last):\n  File \"billing/invoice.py\", line 11, in add_line\n    amount = parse_amount(raw)\n  File \"billing/money.py\", line 9, in parse_amount\n    return float(cleaned)\nValueError: could not convert string to float: '1,299.50'\n```\n\nAmounts without a thousands separator work fine."
+  },
+  "expected_files": [
+    "billing/numbers.py"
+  ],
+  "failing_tests": [
+    "tests/test_money.py::test_parse_with_thousands_separator"
+  ]
+}

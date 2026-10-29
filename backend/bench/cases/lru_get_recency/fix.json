@@ -1,0 +1,7 @@
+[
+  {
+    "path": "cachekit/lru.py",
+    "search": "        return self._data[key]",
+    "replace": "        self._data.move_to_end(key)\n        return self._data[key]"
+  }
+]

@@ -1,0 +1,15 @@
+{
+  "id": "lru_get_recency",
+  "kind": "identifier",
+  "description": "LRUCache.get() does not mark the key as recently used.",
+  "issue": {
+    "title": "LRUCache evicts items I just read",
+    "body": "I use `LRUCache(2)`: put `a`, put `b`, read `a`, then put `c`. I expected `b` to be evicted\nbecause `a` was just used, but `a` is gone instead."
+  },
+  "expected_files": [
+    "cachekit/lru.py"
+  ],
+  "failing_tests": [
+    "tests/test_lru.py::test_get_refreshes_recency"
+  ]
+}

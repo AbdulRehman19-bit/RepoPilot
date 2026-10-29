@@ -1,0 +1,16 @@
+{
+  "id": "pricing_discount_prose",
+  "kind": "prose",
+  "description": "apply_discount() subtracts the fraction instead of scaling the price.",
+  "issue": {
+    "title": "Totals are wrong when a coupon is used",
+    "body": "We offer a 25% discount coupon. A basket of items costing 100 in total shows a price of about\n119.7 at checkout when the coupon is applied, but it should be 90. Without a coupon the totals\nare right, so it only goes wrong with the discount."
+  },
+  "expected_files": [
+    "shop/pricing.py"
+  ],
+  "failing_tests": [
+    "tests/test_pricing.py::test_quarter_off",
+    "tests/test_pricing.py::test_order_total_with_discount"
+  ]
+}

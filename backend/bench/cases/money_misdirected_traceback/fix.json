@@ -1,0 +1,7 @@
+[
+  {
+    "path": "billing/numbers.py",
+    "search": "    return text.replace(\"$\", \"\").replace(\" \", \"\")",
+    "replace": "    return text.replace(\"$\", \"\").replace(\",\", \"\").replace(\" \", \"\")"
+  }
+]

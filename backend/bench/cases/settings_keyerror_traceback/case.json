@@ -1,0 +1,16 @@
+{
+  "id": "settings_keyerror_traceback",
+  "kind": "traceback",
+  "description": "get_setting() ignores its default and raises KeyError for unset settings.",
+  "issue": {
+    "title": "CLI crashes with KeyError when a setting is not configured",
+    "body": "Running the CLI with a config that does not set `proxy` crashes:\n\n```\nTraceback (most recent call last):\n  File \"/home/dev/app/settings/cli.py\", line 15, in main\n    proxy = get_setting(cfg, \"proxy\", default=None)\n  File \"/home/dev/app/settings/config.py\", line 14, in get_setting\n    return settings[name]\nKeyError: 'proxy'\n```\n\nI expected it to fall back to the default."
+  },
+  "expected_files": [
+    "settings/config.py"
+  ],
+  "failing_tests": [
+    "tests/test_config.py::test_missing_setting_uses_default",
+    "tests/test_config.py::test_missing_setting_defaults_to_none"
+  ]
+}

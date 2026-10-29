@@ -1,0 +1,7 @@
+[
+  {
+    "path": "inventory/tags.py",
+    "search": "def add_tag(item, tag, tags=[]):\n    \"\"\"Return a new tag list for `item` including `tag`.\"\"\"\n    tags.append(tag)\n    return {\"item\": item, \"tags\": tags}",
+    "replace": "def add_tag(item, tag, tags=None):\n    \"\"\"Return a new tag list for `item` including `tag`.\"\"\"\n    tags = [*(tags or []), tag]\n    return {\"item\": item, \"tags\": tags}"
+  }
+]

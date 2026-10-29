@@ -1,0 +1,7 @@
+[
+  {
+    "path": "shop/pricing.py",
+    "search": "    return round(price - discount, 2)",
+    "replace": "    return round(price * (1 - discount), 2)"
+  }
+]

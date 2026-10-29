@@ -1,0 +1,16 @@
+{
+  "id": "tags_mutable_default",
+  "kind": "identifier",
+  "description": "add_tag() uses a mutable default argument that is shared between calls.",
+  "issue": {
+    "title": "Tags from one item show up on another",
+    "body": "After adding a tag to one catalogue item, items created later come back with that tag too.\nFor example adding `red` to a shirt and then `blue` to a hat gives the hat both `red` and\n`blue`. Calling `add_tag` without a list seems to share state between calls."
+  },
+  "expected_files": [
+    "inventory/tags.py"
+  ],
+  "failing_tests": [
+    "tests/test_tags.py::test_tags_do_not_leak_between_items",
+    "tests/test_tags.py::test_input_list_is_not_modified"
+  ]
+}

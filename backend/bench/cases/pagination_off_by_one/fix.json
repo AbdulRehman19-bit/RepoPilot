@@ -1,0 +1,7 @@
+[
+  {
+    "path": "libapp/pagination.py",
+    "search": "    start = page * per_page",
+    "replace": "    start = (page - 1) * per_page"
+  }
+]

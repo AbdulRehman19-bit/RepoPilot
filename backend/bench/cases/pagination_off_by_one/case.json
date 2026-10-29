@@ -1,0 +1,16 @@
+{
+  "id": "pagination_off_by_one",
+  "kind": "identifier",
+  "description": "paginate() computes the slice start from page instead of page - 1.",
+  "issue": {
+    "title": "Pagination returns the wrong items",
+    "body": "When I call `paginate(items, 1, 10)` on a list of 25 items I get items 11-20 instead of 1-10.\nThe last page comes back empty. It looks like the pages are off by one."
+  },
+  "expected_files": [
+    "libapp/pagination.py"
+  ],
+  "failing_tests": [
+    "tests/test_pagination.py::test_first_page",
+    "tests/test_pagination.py::test_last_page_is_partial"
+  ]
+}

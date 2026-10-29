@@ -19,3 +19,6 @@ dist/
 .data/
 .workspaces/
 .claude/
+
+# Benchmark run output
+backend/bench/results/

@@ -1,0 +1,7 @@
+[
+  {
+    "path": "textkit/slug.py",
+    "search": "    text = title.strip().lower()\n    text = re.sub(r\"\\s+\", \"-\", text)",
+    "replace": "    text = title.strip().lower()\n    text = re.sub(r\"[^a-z0-9\\s-]\", \"\", text)\n    text = re.sub(r\"\\s+\", \"-\", text)"
+  }
+]

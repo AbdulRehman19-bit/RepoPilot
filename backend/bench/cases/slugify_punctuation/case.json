@@ -1,0 +1,16 @@
+{
+  "id": "slugify_punctuation",
+  "kind": "identifier",
+  "description": "slugify() keeps punctuation instead of dropping it.",
+  "issue": {
+    "title": "slugify keeps punctuation in URLs",
+    "body": "`slugify(\"Hello, World!\")` returns `hello,-world!` which breaks our links.\nI expected `hello-world`."
+  },
+  "expected_files": [
+    "textkit/slug.py"
+  ],
+  "failing_tests": [
+    "tests/test_slug.py::test_punctuation_is_removed",
+    "tests/test_slug.py::test_apostrophes_and_question_marks"
+  ]
+}

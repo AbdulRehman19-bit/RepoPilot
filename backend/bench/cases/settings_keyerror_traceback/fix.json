@@ -1,0 +1,7 @@
+[
+  {
+    "path": "settings/config.py",
+    "search": "    return settings[name]",
+    "replace": "    return settings.get(name, default)"
+  }
+]
