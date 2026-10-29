@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react'
 import { fetchHealth, type Health } from './api'
+import IssueInvestigator from './IssueInvestigator'
 import RepositoryList from './RepositoryList'
 
 export default function App() {
@@ -19,6 +20,7 @@ export default function App() {
         {error ? `unreachable (${error})` : health ? `${health.status} (${health.environment})` : 'checking…'}
       </p>
       <RepositoryList />
+      <IssueInvestigator />
     </main>
   )
 }

@@ -1,0 +1,117 @@
+import { useEffect, useState } from 'react'
+import { fetchIssues, investigateIssue, type Issue, type Retrieval } from './api'
+
+function CodeBlock({ block }: { block: Retrieval['context'][number] }) {
+  const firstLine = block.start_line
+  return (
+    <figure className="code">
+      <figcaption>
+        {block.path}:{block.start_line}-{block.end_line} · {block.label}
+        {block.truncated && ' · truncated to fit the token budget'}
+      </figcaption>
+      <pre>
+        {block.text.split('\n').map((line, i) => (
+          <div key={i}>
+            <span className="lineno">{firstLine + i}</span>
+            {line}
+          </div>
+        ))}
+      </pre>
+    </figure>
+  )
+}
+
+export default function IssueInvestigator() {
+  const [issues, setIssues] = useState<Issue[] | null>(null)
+  const [selected, setSelected] = useState<number | null>(null)
+  const [result, setResult] = useState<Retrieval | null>(null)
+  const [error, setError] = useState<string | null>(null)
+  const [loading, setLoading] = useState(false)
+
+  useEffect(() => {
+    let cancelled = false
+    fetchIssues()
+      .then((list) => !cancelled && setIssues(list))
+      .catch((e: Error) => !cancelled && setError(e.message))
+    return () => {
+      cancelled = true
+    }
+  }, [])
+
+  async function investigate() {
+    if (selected === null) return
+    setLoading(true)
+    setError(null)
+    try {
+      setResult(await investigateIssue(selected))
+    } catch (e) {
+      setResult(null)
+      setError((e as Error).message)
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  if (!issues) return error ? <p role="alert">{error}</p> : <p>Loading issues…</p>
+
+  return (
+    <section>
+      <h2>Investigate an issue</h2>
+      {issues.length === 0 ? (
+        <p>No issues yet. Open an issue on a connected repository.</p>
+      ) : (
+        <div className="toolbar">
+          <select
+            value={selected ?? ''}
+            onChange={(e) => {
+              setSelected(e.target.value ? Number(e.target.value) : null)
+              setResult(null)
+              setError(null)
+            }}
+          >
+            <option value="">Select an issue…</option>
+            {issues.map((issue) => (
+              <option key={issue.id} value={issue.id}>
+                {issue.repository}#{issue.number} — {issue.title}
+              </option>
+            ))}
+          </select>
+          <button onClick={investigate} disabled={selected === null || loading}>
+            {loading ? 'Investigating…' : 'Investigate'}
+          </button>
+        </div>
+      )}
+      {error && <p role="alert">{error}</p>}
+
+      {result && (
+        <>
+          <p className="meta">
+            Found in the report: {result.signals.paths.length} file path(s),{' '}
+            {result.signals.identifiers.length} identifier(s)
+            {result.signals.error_types.length > 0 && `, ${result.signals.error_types.join(', ')}`}
+          </p>
+          {result.matches.length === 0 ? (
+            <p>No relevant files found. Try adding a traceback or function names to the issue.</p>
+          ) : (
+            <ol className="matches">
+              {result.matches.map((match) => (
+                <li key={match.path}>
+                  <strong>{match.path}</strong> <span className="meta">score {match.score}</span>
+                  <div>{match.explanation}</div>
+                </li>
+              ))}
+            </ol>
+          )}
+          {result.context.length > 0 && (
+            <>
+              <h3>Code context (~{result.context_tokens} tokens)</h3>
+              {result.context.map((block) => (
+                <CodeBlock key={`${block.path}:${block.start_line}`} block={block} />
+              ))}
+            </>
+          )}
+        </>
+      )}
+    </section>
+  )
+}

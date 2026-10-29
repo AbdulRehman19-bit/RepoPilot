@@ -6,7 +6,8 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.db import get_session
-from app.models import Issue
+from app.models import IndexedFile, Issue
+from app.retrieval.context import build_blocks, explain
 from app.retrieval.ranker import rank_files
 from app.retrieval.signals import extract_signals
 
@@ -31,8 +32,19 @@ class FocusOut(BaseModel):
 class MatchOut(BaseModel):
     path: str
     score: float
+    explanation: str
     reasons: list[str]
     focus: list[FocusOut]
+
+
+class ContextBlockOut(BaseModel):
+    path: str
+    start_line: int
+    end_line: int
+    label: str
+    text: str
+    tokens: int
+    truncated: bool
 
 
 class SignalsOut(BaseModel):
@@ -45,6 +57,8 @@ class RetrievalOut(BaseModel):
     issue: IssueOut
     signals: SignalsOut
     matches: list[MatchOut]
+    context: list[ContextBlockOut]
+    context_tokens: int
 
 
 def _issue_out(issue: Issue) -> IssueOut:
@@ -64,7 +78,10 @@ def list_issues(session: SessionDep) -> list[IssueOut]:
 
 @router.post("/{issue_id}/retrieve")
 def retrieve(
-    issue_id: int, session: SessionDep, limit: Annotated[int, Query(ge=1, le=25)] = 8
+    issue_id: int,
+    session: SessionDep,
+    limit: Annotated[int, Query(ge=1, le=25)] = 8,
+    budget_tokens: Annotated[int, Query(ge=500, le=16000)] = 3000,
 ) -> RetrievalOut:
     issue = session.get(Issue, issue_id)
     if issue is None:
@@ -74,7 +91,15 @@ def retrieve(
 
     text = f"{issue.title}\n{issue.body}"
     signals = extract_signals(text)
-    matches = rank_files(session, issue.repository_id, text, limit)
+    matches = rank_files(session, issue.repository_id, text, limit, signals=signals)
+    contents = dict(
+        session.execute(
+            select(IndexedFile.id, IndexedFile.content).where(
+                IndexedFile.id.in_([m.file_id for m in matches])
+            )
+        ).all()
+    )
+    blocks = build_blocks(matches, contents, signals.words, budget_tokens)
     return RetrievalOut(
         issue=_issue_out(issue),
         signals=SignalsOut(
@@ -86,9 +111,12 @@ def retrieve(
             MatchOut(
                 path=m.path,
                 score=m.score,
+                explanation=explain(m),
                 reasons=m.reasons,
                 focus=[FocusOut(**vars(f)) for f in m.focus],
             )
             for m in matches
         ],
+        context=[ContextBlockOut(**vars(b)) for b in blocks],
+        context_tokens=sum(b.tokens for b in blocks),
     )

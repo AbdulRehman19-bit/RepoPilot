@@ -32,6 +32,7 @@ class Match:
     score: float = 0.0
     reasons: list[str] = field(default_factory=list)
     focus: list[Focus] = field(default_factory=list)
+    hint_lines: list[int] = field(default_factory=list)  # traceback lines in this file
 
 
 def _path_matches(mentioned: str, indexed_paths: list[str]) -> list[str]:
@@ -53,8 +54,14 @@ def _tsquery(signals: Signals) -> str | None:
     return " | ".join(cleaned) or None
 
 
-def rank_files(session: Session, repository_id: int, text: str, limit: int = 8) -> list[Match]:
-    signals = extract_signals(text)
+def rank_files(
+    session: Session,
+    repository_id: int,
+    text: str,
+    limit: int = 8,
+    signals: Signals | None = None,
+) -> list[Match]:
+    signals = signals or extract_signals(text)
     files = session.execute(
         select(IndexedFile.id, IndexedFile.path).where(IndexedFile.repository_id == repository_id)
     ).all()
@@ -81,6 +88,7 @@ def rank_files(session: Session, repository_id: int, text: str, limit: int = 8) 
             match.reasons.append(f"named in the issue: {ref.path}{where}")
             if ref.line:
                 line_hints.setdefault(by_path[path], []).append(ref.line)
+                match.hint_lines.append(ref.line)
 
     # 2. Symbols the issue names, and symbols enclosing a traceback line.
     strong = signals.identifiers

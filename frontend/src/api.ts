@@ -28,3 +28,39 @@ export const fetchHealth = () => request<Health>('/health')
 export const fetchRepositories = () => request<Repository[]>('/repositories')
 export const reindexRepository = (id: number) =>
   request<Repository>(`/repositories/${id}/reindex`, { method: 'POST' })
+
+export interface Issue {
+  id: number
+  repository: string
+  number: number
+  title: string
+}
+
+export interface Match {
+  path: string
+  score: number
+  explanation: string
+  reasons: string[]
+}
+
+export interface ContextBlock {
+  path: string
+  start_line: number
+  end_line: number
+  label: string
+  text: string
+  tokens: number
+  truncated: boolean
+}
+
+export interface Retrieval {
+  issue: Issue
+  signals: { paths: string[]; identifiers: string[]; error_types: string[] }
+  matches: Match[]
+  context: ContextBlock[]
+  context_tokens: number
+}
+
+export const fetchIssues = () => request<Issue[]>('/issues')
+export const investigateIssue = (id: number) =>
+  request<Retrieval>(`/issues/${id}/retrieve`, { method: 'POST' })

@@ -53,3 +53,46 @@ main {
 .badge.indexing {
   background: color-mix(in srgb, goldenrod 30%, transparent);
 }
+
+.toolbar {
+  display: flex;
+  gap: 0.5rem;
+}
+
+.toolbar select {
+  flex: 1;
+  min-width: 0;
+}
+
+.matches li {
+  margin-bottom: 0.75rem;
+}
+
+.code {
+  margin: 1rem 0;
+  border: 1px solid color-mix(in srgb, currentColor 20%, transparent);
+  border-radius: 6px;
+  overflow: hidden;
+}
+
+.code figcaption {
+  padding: 0.4rem 0.75rem;
+  font-size: 0.8rem;
+  background: color-mix(in srgb, currentColor 8%, transparent);
+}
+
+.code pre {
+  margin: 0;
+  padding: 0.5rem 0;
+  overflow-x: auto;
+  font-size: 0.8rem;
+}
+
+.lineno {
+  display: inline-block;
+  width: 3rem;
+  padding-right: 0.75rem;
+  text-align: right;
+  color: GrayText;
+  user-select: none;
+}
