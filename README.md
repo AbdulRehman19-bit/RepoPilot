@@ -13,7 +13,7 @@ The differentiator is **reproducibility and verification**, not just code genera
 
 ## Status
 
-Work in progress. See `docs/plan.md`.
+Work in progress. See `docs/plan.md`. To connect a real GitHub App and repository, follow `docs/pilot.md`; `cd backend && uv run python -m app.doctor --online` checks the setup. Measured results and their limits are in `docs/benchmark.md`; the security model is in `docs/threat-model.md`.
 
 ## Sandbox image
 
