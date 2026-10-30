@@ -18,6 +18,7 @@ from pathlib import Path
 
 from app.config import settings
 from app.indexing.workspace import remove_tree
+from app.sandbox.egress import restricted_egress
 from app.sandbox.runner import Mount, SandboxError, run_in_sandbox
 
 REQUIREMENT_FILES = (
@@ -134,21 +135,24 @@ def prepare_dependencies(checkout: Path) -> DependencyEnv:
     manifest_dir.mkdir()
     (manifest_dir / "requirements.txt").write_text("\n".join(requirements.specs) + "\n")
     try:
-        result = run_in_sandbox(
-            manifest_dir,
-            [
-                "python", "-m", "pip", "install",
-                "--only-binary=:all:",
-                "--no-cache-dir",
-                "--disable-pip-version-check",
-                "--target", "/deps",
-                "-r", "/workspace/requirements.txt",
-            ],
-            network=True,
-            timeout=INSTALL_TIMEOUT_SECONDS,
-            memory=INSTALL_MEMORY,
-            mounts=[Mount(building / "site-packages", "/deps", writable=True)],
-        )  # fmt: skip
+        install = [
+            "python", "-m", "pip", "install",
+            "--only-binary=:all:",
+            "--no-cache-dir",
+            "--disable-pip-version-check",
+            "--target", "/deps",
+            "-r", "/workspace/requirements.txt",
+        ]  # fmt: skip
+        mounts = [Mount(building / "site-packages", "/deps", writable=True)]
+        limits = {"timeout": INSTALL_TIMEOUT_SECONDS, "memory": INSTALL_MEMORY, "mounts": mounts}
+        if settings.install_egress_proxy:
+            # Only the allowlisted package hosts are reachable, through the proxy.
+            with restricted_egress() as egress:
+                result = run_in_sandbox(
+                    manifest_dir, install, network=egress.network, env=egress.env, **limits
+                )
+        else:
+            result = run_in_sandbox(manifest_dir, install, network=True, **limits)
         if not result.ok:
             tail = (result.stderr or result.stdout).strip().splitlines()[-8:]
             reason = "timed out" if result.timed_out else "\n".join(tail)

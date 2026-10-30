@@ -23,7 +23,9 @@ Untrusted code (a repository's tests, proposed patches) only ever runs inside a 
 docker build -t repopilot-sandbox:py311 docker/sandbox
 ```
 
-Containers run with no network, a read-only root filesystem, a non-root user, no capabilities, and CPU/memory/process/time/output limits. The sandbox tests (`backend/tests/test_sandbox.py`) are skipped automatically if the image isn't built.
+Dependency installs are the one step that needs the internet. They run on an isolated Docker network whose only exit is a small allowlist proxy (PyPI's two hosts, HTTPS only), so the installer cannot reach anything else; see `docs/threat-model.md`.
+
+Test containers run with no network, a read-only root filesystem, a non-root user, no capabilities, and CPU/memory/process/time/output limits. The sandbox tests (`backend/tests/test_sandbox.py`) are skipped automatically if the image isn't built.
 
 ## Review and pull requests
 

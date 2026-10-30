@@ -52,15 +52,18 @@ against the code as of step 17. A control listed here has a test unless marked o
 | T19 | The person who asked for a patch also approves it | `REPOPILOT_REQUIRE_SEPARATE_REVIEWER=true` refuses approval by the recorded requester (off by default, since a solo user would be locked out) | tested |
 | T20 | Revoked access keeps working until the session expires | Sessions default to 4 hours; `python -m app.auth.revoke <login>` or `--all` ends them immediately | tested |
 | T21 | Cookie requests refused behind a proxy that rewrites `Host` | The configured `frontend_url` origin is accepted alongside the request's own host | tested |
+| T22 | The dependency-install container reaches arbitrary hosts | It runs on a Docker `--internal` network (no route out) with a locked-down proxy container (read-only, no capabilities, uid 1000, 128 MB) that tunnels HTTPS only to `pypi.org` and `files.pythonhosted.org`, port 443, by exact hostname (no IP literals, no other ports); the network and proxy are removed afterwards, also on failure | tested: direct connections fail, other hosts get 403, a pip index on another host fails, an end-to-end install works |
 
 ## Known gaps (not fixed)
 
-- **Dependency install still has network access.** It needs PyPI. What limits it: only prebuilt
-  wheels are installed (no build scripts run), direct URLs, VCS references, local paths and
-  option lines are skipped, the container holds no secrets and no project code, and it is
-  covered by the disk quota. What does not: the container can reach any host, not only PyPI, and
-  a repository can still make RepoPilot install any package name it chooses. Closing this needs
-  an egress proxy or a pull-through mirror that only serves allowed packages.
+- **Dependency install can still reach PyPI**, and a repository can make RepoPilot install any
+  package name it chooses from there (typosquats included). What limits the damage: only
+  prebuilt wheels are installed (no build scripts run), direct URLs, VCS references, local paths
+  and option lines are skipped, the container holds no secrets and no project code, and the
+  disk quota applies. The installed code then only ever runs with the network off. A mirror that
+  serves an allowlist of packages would close the rest. Setting `REPOPILOT_INSTALL_EGRESS_PROXY=false`
+  removes all of this and gives the installer the open internet; do not.
+- **The egress proxy trusts DNS on the worker's machine** to resolve the two allowed names.
 - **Redaction is pattern-based.** A secret in an unrecognised format passes through. Secrets
   committed to a repo are also in the copy the sandbox sees.
 - **Replay window is 24 h**, and the Redis claim fails open if Redis is down. GitHub sends no

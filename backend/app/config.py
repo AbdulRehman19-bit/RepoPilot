@@ -22,6 +22,10 @@ class Settings(BaseSettings):
     # Total bytes / files a run may hold in its writable directories (checkout copy, installs).
     sandbox_disk_limit_bytes: int = 1_000_000_000
     sandbox_max_files: int = 100_000
+    # Dependency installs reach the internet only through an allowlist proxy on an isolated
+    # network. Turning the proxy off gives the install container the open internet.
+    install_egress_proxy: bool = True
+    install_allowed_hosts: str = "pypi.org,files.pythonhosted.org"
 
     # "ollama" talks to a local Ollama server; "none" disables the model entirely.
     llm_provider: str = "ollama"

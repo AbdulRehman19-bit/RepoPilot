@@ -137,7 +137,7 @@ def docker_command(
     pids_limit: int,
     mounts: Sequence[Mount] = (),
     env: Mapping[str, str] | None = None,
-    network: bool = False,
+    network: bool | str = False,
 ) -> list[str]:
     extra: list[str] = []
     for key, value in (env or {}).items():
@@ -147,7 +147,7 @@ def docker_command(
         extra += ["-v", f"{mount.host.resolve().as_posix()}:{mount.target}:{mode}"]
     return [
         "docker", "run", "--rm", "--name", name,
-        "--network", "bridge" if network else "none",
+        "--network", network if isinstance(network, str) else ("bridge" if network else "none"),
         "--memory", memory, "--memory-swap", memory,
         "--cpus", str(cpus),
         "--pids-limit", str(pids_limit),
@@ -199,13 +199,14 @@ def run_in_sandbox(
     keep_changes_in: Path | None = None,
     mounts: Sequence[Mount] = (),
     env: Mapping[str, str] | None = None,
-    network: bool = False,
+    network: bool | str = False,
 ) -> SandboxResult:
     """Run `command` inside a container against a private copy of `checkout`.
 
     The original checkout is never modified. If `keep_changes_in` is given, the copy (including
     anything the command wrote) is moved there instead of being deleted. The network is off
-    unless `network=True`, which is only for the dependency-install phase.
+    unless `network` is `True` (open internet) or the name of an existing Docker network, which
+    is only for the dependency-install phase.
     """
     timeout = timeout or settings.sandbox_timeout_seconds
     output_limit = output_limit or settings.sandbox_output_limit_bytes
