@@ -5,6 +5,7 @@ from pydantic import BaseModel
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from app.api.ratelimit import per_caller
 from app.api.security import PrincipalDep
 from app.db import get_session
 from app.models import Issue, Repository, TestExecution
@@ -109,7 +110,11 @@ def _start(
     return _out(execution)
 
 
-@router.post("/repositories/{repo_id}/baseline", status_code=202)
+@router.post(
+    "/repositories/{repo_id}/baseline",
+    status_code=202,
+    dependencies=[per_caller("jobs", "rate_limit_jobs_per_hour")],
+)
 def run_baseline(repo_id: int, session: SessionDep, principal: PrincipalDep) -> ExecutionOut:
     repo = session.get(Repository, repo_id)
     if repo is None:
@@ -118,7 +123,11 @@ def run_baseline(repo_id: int, session: SessionDep, principal: PrincipalDep) -> 
     return _start(session, repo, "baseline", [], None)
 
 
-@router.post("/issues/{issue_id}/reproduce", status_code=202)
+@router.post(
+    "/issues/{issue_id}/reproduce",
+    status_code=202,
+    dependencies=[per_caller("jobs", "rate_limit_jobs_per_hour")],
+)
 def reproduce(
     issue_id: int, session: SessionDep, principal: PrincipalDep, body: ReproduceIn | None = None
 ) -> ExecutionOut:

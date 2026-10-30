@@ -5,6 +5,7 @@ from pydantic import BaseModel
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from app.api.ratelimit import per_caller
 from app.api.security import Principal, PrincipalDep
 from app.db import get_session
 from app.llm.base import LLMError
@@ -140,7 +141,7 @@ def retrieve(
     )
 
 
-@router.post("/{issue_id}/explain")
+@router.post("/{issue_id}/explain", dependencies=[per_caller("ai", "rate_limit_ai_per_hour")])
 def explain_issue(
     issue_id: int,
     session: SessionDep,

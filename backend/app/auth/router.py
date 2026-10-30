@@ -7,6 +7,7 @@ from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import RedirectResponse, Response
 from sqlalchemy.orm import Session
 
+from app.api.ratelimit import per_ip
 from app.api.security import same_origin
 from app.auth import oauth, sessions
 from app.config import settings
@@ -43,7 +44,7 @@ def auth_config(request: Request, db: Annotated[Session, Depends(get_session)]) 
     }
 
 
-@router.get("/login")
+@router.get("/login", dependencies=[per_ip("login", "rate_limit_login_per_minute")])
 def login() -> RedirectResponse:
     if not oauth.is_configured():
         raise HTTPException(status_code=503, detail="GitHub sign-in is not configured")
@@ -53,7 +54,7 @@ def login() -> RedirectResponse:
     return response
 
 
-@router.get("/callback")
+@router.get("/callback", dependencies=[per_ip("login", "rate_limit_login_per_minute")])
 def callback(
     request: Request,
     db: Annotated[Session, Depends(get_session)],

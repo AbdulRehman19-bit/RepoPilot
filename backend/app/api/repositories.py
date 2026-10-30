@@ -5,6 +5,7 @@ from pydantic import BaseModel
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
+from app.api.ratelimit import per_caller
 from app.api.security import PrincipalDep
 from app.db import get_session
 from app.models import IndexedFile, Repository
@@ -57,7 +58,11 @@ def list_repositories(session: SessionDep, principal: PrincipalDep) -> list[Repo
     return [_to_out(repo, count) for repo, count in rows]
 
 
-@router.post("/{repo_id}/reindex", status_code=202)
+@router.post(
+    "/{repo_id}/reindex",
+    status_code=202,
+    dependencies=[per_caller("jobs", "rate_limit_jobs_per_hour")],
+)
 def reindex(repo_id: int, session: SessionDep, principal: PrincipalDep) -> RepositoryOut:
     repo = session.get(Repository, repo_id)
     if repo is None:

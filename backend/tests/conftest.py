@@ -31,3 +31,9 @@ def no_replay_store(monkeypatch):
     monkeypatch.setattr(
         github_router, "replay", SimpleNamespace(claim=lambda body: True, release=lambda body: None)
     )
+
+
+@pytest.fixture(autouse=True)
+def no_rate_limits(monkeypatch):
+    """Counters live in a real Redis and persist between test runs; keep other tests independent."""
+    monkeypatch.setattr("app.api.ratelimit.hit", lambda key, limit, window: None)

@@ -38,6 +38,11 @@ class Settings(BaseSettings):
     # Request size caps, in bytes. Webhooks carry whole issue bodies; API calls are small JSON.
     max_webhook_bytes: int = 5_000_000
     max_request_bytes: int = 1_000_000
+    # Per caller per hour (0 disables): sandbox runs / patch generation, and model calls. Sign-in
+    # endpoints are limited per client address per minute.
+    rate_limit_jobs_per_hour: int = 30
+    rate_limit_ai_per_hour: int = 60
+    rate_limit_login_per_minute: int = 20
 
     github_api_url: str = "https://api.github.com"
     github_clone_base: str = "https://github.com"

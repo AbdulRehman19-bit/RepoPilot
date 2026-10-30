@@ -7,6 +7,7 @@ from pydantic import BaseModel, Field
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from app.api.ratelimit import per_caller
 from app.api.security import Principal, PrincipalDep, require_approvals_enabled
 from app.db import get_session
 from app.github.pulls import (
@@ -110,7 +111,11 @@ def _reproduced(execution: TestExecution) -> bool:
     )
 
 
-@router.post("/issues/{issue_id}/patch", status_code=202)
+@router.post(
+    "/issues/{issue_id}/patch",
+    status_code=202,
+    dependencies=[per_caller("jobs", "rate_limit_jobs_per_hour")],
+)
 def start_patch(
     issue_id: int, session: SessionDep, principal: PrincipalDep, body: PatchIn | None = None
 ) -> PatchOut:
