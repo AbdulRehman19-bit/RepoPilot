@@ -28,7 +28,7 @@ against the code as of step 17. A control listed here has a test unless marked o
 |---|---|---|---|
 | T1 | Forged webhook | HMAC-SHA256 over the raw body, constant-time compare; fails closed if no secret is set | tested |
 | T2 | Replayed webhook (e.g. old `issues` event overwrites newer issue text) | Body-hash claim in Redis for 24 h; released if processing fails so GitHub's redelivery works | tested |
-| T3 | Oversized request exhausting memory/CPU | Webhook cap 5 MB (checked from `Content-Length` and again on the body); API cap 1 MB via `Content-Length` | tested |
+| T3 | Oversized request exhausting memory/CPU | Webhook cap 5 MB, API cap 1 MB, enforced from `Content-Length` and by counting bytes as they stream in, so chunked uploads without a length are cut off too (reading stops at the cap and the answer is 413) | tested |
 | T4 | Malformed but correctly signed payload causing 500s | JSON / shape errors return 400 / 422 and roll back | tested |
 | T5 | Unauthenticated API use | Sign in with GitHub (random session cookie, HttpOnly, SameSite=Lax, only its hash stored) or the shared bearer token (constant-time compare); approvals/PR creation disabled (503) when neither is configured | tested |
 | T13 | A signed-in user reaches another team's repositories | Access map taken from GitHub at sign-in (repositories reachable by both the user and the app); every route checks it; unreachable repositories return 404, read-only ones 403 on anything that runs code or writes | tested |
@@ -77,8 +77,6 @@ against the code as of step 17. A control listed here has a test unless marked o
   permission names).
 - **Rate limits fail open if Redis is down**, and the per-address login limit sees the proxy's
   address, not the user's, when the API sits behind a reverse proxy that does not forward it.
-- **`Content-Length`-less (chunked) API bodies are not size-capped at the app layer**; put a
-  reverse proxy in front.
 - **Source code goes to the model.** With the local Ollama provider it stays on the machine;
   any hosted provider would receive private code.
 - **TLS and network exposure are not handled by the app.** Run it behind a TLS-terminating proxy.
