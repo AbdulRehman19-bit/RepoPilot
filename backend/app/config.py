@@ -49,7 +49,8 @@ class Settings(BaseSettings):
     github_oauth_url: str = "https://github.com"
     frontend_url: str = "http://localhost:5173"
     session_ttl_hours: int = 8
-    # Secure cookies need HTTPS; browsers exempt localhost, so the default is safe in development.
+    # Secure cookies need HTTPS. Chrome and Firefox accept them on http://localhost; some browsers
+    # (notably Safari) do not, so set this to false for local development there.
     session_cookie_secure: bool = True
 
     def github_private_key(self) -> str:

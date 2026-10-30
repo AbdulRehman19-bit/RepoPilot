@@ -313,6 +313,14 @@ def alice(client, db_session, world):
     return client
 
 
+def test_a_user_with_no_repositories_sees_nothing_and_is_not_an_error(client, db_session, world):
+    token = sessions.create_session(db_session, make_user(db_session, 777, "nobody"), {})
+    client.cookies.set("rp_session", token)
+    assert client.get("/repositories").json() == []
+    assert client.get("/issues").json() == []
+    assert client.get(f"/patches/{world['A'].patch.id}").status_code == 404
+
+
 def test_lists_only_show_what_the_user_can_reach(alice):
     names = [r["full_name"] for r in alice.get("/repositories").json()]
     assert names == ["org/A", "org/B"]
