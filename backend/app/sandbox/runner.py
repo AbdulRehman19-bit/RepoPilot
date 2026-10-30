@@ -5,6 +5,7 @@ environment variables, no Docker socket, read-only root filesystem, non-root use
 capabilities, and hard CPU/memory/process/time/output limits.
 """
 
+import os
 import shutil
 import stat
 import subprocess
@@ -20,6 +21,7 @@ from app.indexing.workspace import remove_tree
 
 COPY_IGNORE = shutil.ignore_patterns(".git", ".venv", "venv", "node_modules", "__pycache__")
 KILL_GRACE_SECONDS = 15
+DISK_POLL_SECONDS = 1.0
 TIMEOUT_EXIT_CODE = 124  # same convention as coreutils `timeout`
 OOM_OR_KILLED_EXIT_CODE = 137
 
@@ -46,6 +48,7 @@ class SandboxResult:
     killed: bool  # SIGKILL from outside the program: usually the memory limit
     truncated: bool
     duration_seconds: float
+    disk_exceeded: bool = False  # killed for writing more than the disk quota allows
 
     @property
     def ok(self) -> bool:
@@ -71,6 +74,56 @@ class _CappedReader(threading.Thread):
 
     def text(self) -> str:
         return self.data.decode("utf-8", errors="replace")
+
+
+def tree_usage(root: Path) -> tuple[int, int]:
+    """(bytes, files) under `root`, never following symlinks. Tolerates files vanishing mid-scan."""
+    total = files = 0
+    pending = [str(root)]
+    while pending:
+        try:
+            with os.scandir(pending.pop()) as entries:
+                for entry in entries:
+                    if entry.is_dir(follow_symlinks=False):
+                        pending.append(entry.path)
+                        continue
+                    files += 1
+                    try:
+                        total += entry.stat(follow_symlinks=False).st_size
+                    except OSError:
+                        pass
+        except OSError:
+            continue
+    return total, files
+
+
+def over_quota(roots: Sequence[Path]) -> bool:
+    """True if what the roots hold, taken together, exceeds the configured disk quota."""
+    total = files = 0
+    for root in roots:
+        used, count = tree_usage(root)
+        total, files = total + used, files + count
+    return total > settings.sandbox_disk_limit_bytes or files > settings.sandbox_max_files
+
+
+class _DiskWatchdog(threading.Thread):
+    """Kill the container if it fills the disk. Per-file size and tmpfs are already capped, but
+    a bind-mounted directory can otherwise be filled with an unlimited number of files."""
+
+    def __init__(self, container: str, roots: Sequence[Path]):
+        super().__init__(daemon=True)
+        self.container, self.roots = container, list(roots)
+        self.stop = threading.Event()
+        self.exceeded = False
+
+    def run(self) -> None:
+        while not self.stop.wait(DISK_POLL_SECONDS):
+            if over_quota(self.roots):
+                self.exceeded = True
+                subprocess.run(
+                    ["docker", "kill", self.container], capture_output=True, check=False, timeout=30
+                )
+                return
 
 
 def docker_command(
@@ -160,6 +213,7 @@ def run_in_sandbox(
     scratch_root.mkdir(parents=True, exist_ok=True)
     workdir = _copy_checkout(checkout, scratch_root)
     name = f"repopilot-sbx-{uuid.uuid4().hex[:12]}"
+    watched = [workdir, *(m.host for m in mounts if m.writable)]
 
     cmd = docker_command(
         name,
@@ -175,7 +229,10 @@ def run_in_sandbox(
     )
     started = time.monotonic()
     timed_out = False
+    watchdog = _DiskWatchdog(name, watched)
     try:
+        if over_quota([workdir]):
+            raise SandboxError("the repository is too large to test within the disk quota")
         try:
             process = subprocess.Popen(
                 cmd, stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=subprocess.PIPE
@@ -189,6 +246,7 @@ def run_in_sandbox(
         )
         out.start()
         err.start()
+        watchdog.start()
         try:
             process.wait(timeout=timeout)
         except subprocess.TimeoutExpired:
@@ -201,6 +259,8 @@ def run_in_sandbox(
 
         exit_code = TIMEOUT_EXIT_CODE if timed_out else process.returncode
         stderr = err.text()
+        if watchdog.exceeded:
+            stderr += "\n[repopilot] stopped: the run wrote more than the disk quota allows\n"
         if exit_code == 125 and "Unable to find image" in stderr:
             raise SandboxError(f"sandbox image {cmd[-len(command) - 1]!r} is not built")
         return SandboxResult(
@@ -211,8 +271,10 @@ def run_in_sandbox(
             killed=exit_code == OOM_OR_KILLED_EXIT_CODE and not timed_out,
             truncated=out.truncated or err.truncated,
             duration_seconds=round(time.monotonic() - started, 3),
+            disk_exceeded=watchdog.exceeded,
         )
     finally:
+        watchdog.stop.set()
         subprocess.run(["docker", "rm", "-f", name], capture_output=True, check=False, timeout=30)
         if keep_changes_in is not None:
             remove_tree(keep_changes_in)

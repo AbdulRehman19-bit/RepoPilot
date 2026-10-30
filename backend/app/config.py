@@ -19,6 +19,9 @@ class Settings(BaseSettings):
     sandbox_cpus: float = 1.0
     sandbox_pids_limit: int = 128
     sandbox_output_limit_bytes: int = 200_000
+    # Total bytes / files a run may hold in its writable directories (checkout copy, installs).
+    sandbox_disk_limit_bytes: int = 1_000_000_000
+    sandbox_max_files: int = 100_000
 
     # "ollama" talks to a local Ollama server; "none" disables the model entirely.
     llm_provider: str = "ollama"

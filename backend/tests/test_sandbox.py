@@ -181,3 +181,91 @@ def test_huge_output_is_truncated(checkout):
 def test_missing_image_raises_sandbox_error(checkout):
     with pytest.raises(SandboxError):
         run_in_sandbox(checkout, ["true"], image="repopilot-image-that-does-not-exist:none")
+
+
+# --- Disk quota ----------------------------------------------------------------------------------
+
+
+def scratch_is_empty() -> bool:
+    root = settings.workspace_dir / "sandbox"
+    return not root.exists() or not any(root.iterdir())
+
+
+def test_tree_usage_counts_bytes_and_files(tmp_path):
+    from app.sandbox.runner import tree_usage
+
+    (tmp_path / "a").mkdir()
+    (tmp_path / "a" / "one.txt").write_bytes(b"x" * 100)
+    (tmp_path / "two.txt").write_bytes(b"y" * 50)
+    assert tree_usage(tmp_path) == (150, 2)
+    assert tree_usage(tmp_path / "missing") == (0, 0)  # vanishing directories are tolerated
+
+
+def test_oversized_checkout_is_refused_before_any_container_starts(checkout, monkeypatch):
+    monkeypatch.setattr(settings, "sandbox_max_files", 1)  # the checkout has two files
+    with pytest.raises(SandboxError, match="too large"):
+        run_in_sandbox(checkout, ["true"])
+    assert scratch_is_empty()
+    assert leftover_containers() == ""
+
+
+@requires_docker
+def test_a_run_that_creates_endless_files_is_killed(checkout, monkeypatch):
+    monkeypatch.setattr("app.sandbox.runner.DISK_POLL_SECONDS", 0.2)
+    monkeypatch.setattr(settings, "sandbox_max_files", 500)
+    code = (
+        "import os\n"
+        "os.makedirs('spam', exist_ok=True)\n"
+        "i = 0\n"
+        "while True:\n"
+        "    open(f'spam/{i}', 'w').close()\n"
+        "    i += 1\n"
+    )
+    result = run_in_sandbox(checkout, py(code), timeout=60)
+    assert result.disk_exceeded and not result.ok and not result.timed_out
+    assert "disk quota" in result.stderr
+    assert result.duration_seconds < 30
+    assert leftover_containers() == ""
+    assert scratch_is_empty()  # the copy is deleted even though the run was killed
+
+
+@requires_docker
+def test_a_run_that_writes_endless_bytes_is_killed(checkout, monkeypatch):
+    monkeypatch.setattr("app.sandbox.runner.DISK_POLL_SECONDS", 0.2)
+    monkeypatch.setattr(settings, "sandbox_disk_limit_bytes", 30_000_000)
+    code = (
+        "i = 0\n"
+        "while True:\n"
+        "    with open(f'big{i}', 'wb') as f:\n"
+        "        f.write(b'x' * 5_000_000)\n"
+        "    i += 1\n"
+    )
+    result = run_in_sandbox(checkout, py(code), timeout=60)
+    assert result.disk_exceeded
+    assert leftover_containers() == ""
+
+
+@requires_docker
+def test_writable_mounts_count_toward_the_quota(checkout, tmp_path, monkeypatch):
+    from app.sandbox.runner import Mount
+
+    monkeypatch.setattr("app.sandbox.runner.DISK_POLL_SECONDS", 0.2)
+    monkeypatch.setattr(settings, "sandbox_disk_limit_bytes", 20_000_000)
+    out = tmp_path / "out"
+    out.mkdir()
+    out.chmod(0o777)
+    code = (
+        "i = 0\n"
+        "while True:\n"
+        "    with open(f'/out/f{i}', 'wb') as f:\n"
+        "        f.write(b'x' * 5_000_000)\n"
+        "    i += 1\n"
+    )
+    result = run_in_sandbox(checkout, py(code), mounts=[Mount(out, "/out", writable=True)])
+    assert result.disk_exceeded
+
+
+@requires_docker
+def test_normal_runs_are_unaffected_by_the_quota(checkout):
+    result = run_in_sandbox(checkout, py("print('hello')"))
+    assert result.ok and not result.disk_exceeded and result.stdout.strip() == "hello"
