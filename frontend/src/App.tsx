@@ -70,6 +70,8 @@ export default function App() {
   const [error, setError] = useState<string | null>(null)
   // Bumping this remounts the data views so they refetch after signing in or out.
   const [version, setVersion] = useState(0)
+  // Set when a call is refused after we had been working, i.e. the session probably ended.
+  const [refused, setRefused] = useState(false)
 
   useEffect(() => {
     fetchHealth().then(setHealth).catch((e: Error) => setError(e.message))
@@ -80,7 +82,10 @@ export default function App() {
   // A refused call usually means the session ended. Re-check who we are (this does not remount
   // the data views, so it cannot loop); if we are signed out the sign-in prompt replaces them.
   useEffect(() => {
-    const recheck = () => fetchAuthConfig().then(setAuth).catch(() => undefined)
+    const recheck = () => {
+      setRefused(true)
+      fetchAuthConfig().then(setAuth).catch(() => undefined)
+    }
     window.addEventListener(UNAUTHORIZED_EVENT, recheck)
     return () => window.removeEventListener(UNAUTHORIZED_EVENT, recheck)
   }, [])
@@ -96,7 +101,14 @@ export default function App() {
         {error ? `unreachable (${error})` : health ? `${health.status} (${health.environment})` : 'checking…'}
       </p>
       {auth && <Account auth={auth} onChange={() => setVersion((v) => v + 1)} />}
-      {auth && !canUse && <p>Sign in to see your repositories. (Your session may have ended.)</p>}
+      {auth && !canUse && (
+        <p>
+          {auth.login_available
+            ? 'Sign in with GitHub to see your repositories.'
+            : 'Enter the API token to see your repositories.'}
+          {refused && ' Your session may have ended.'}
+        </p>
+      )}
       {canUse && (
         <>
           <RepositoryList key={`repos-${version}`} />

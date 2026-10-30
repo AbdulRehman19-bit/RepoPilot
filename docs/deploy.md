@@ -23,7 +23,7 @@ pointless. Keep the worker a plain host process.
 
 The compose stack was brought up end to end on a developer machine with throwaway secrets, behind
 Caddy's local CA, and exercised with `curl`: the built frontend and its client-side routing, the
-API under `/api`, security headers, `401` without credentials and `200` with a named token,
+API under `/api`, security headers (including the CSP, checked in Chrome for violations), `401` without credentials and `200` with a named token,
 unsigned webhooks refused, HTTP redirected to HTTPS, the API container healthy while read-only
 and non-root, migrations run by a one-shot service, and the host-side doctor passing against the
 published Postgres and Redis.
@@ -84,8 +84,10 @@ and the worker running as a service.
 - Postgres and Redis publish only on `127.0.0.1`; Redis requires a password. If the host is
   shared, anyone with a shell on it can still reach them.
 - The API container is read-only with every capability dropped and runs as a non-root user.
-- Caddy sets HSTS, `nosniff`, `X-Frame-Options: DENY` and a same-origin referrer policy. There is
-  no Content-Security-Policy yet.
+- Caddy sets HSTS, `nosniff`, `X-Frame-Options: DENY`, a same-origin referrer policy and a strict
+  Content-Security-Policy (`default-src 'self'`, no inline script or style). The built page was
+  loaded in Chrome through Caddy with it and produced no violations; if you add features that load
+  anything from another origin, the policy in `deploy/Caddyfile` must be widened.
 - Per-address rate limits use the client address that Caddy forwards. The compose file trusts
   forwarded headers from any address on the compose network, which is fine because only Caddy
   can reach the API there; do not expose the API container's port directly.
@@ -94,5 +96,5 @@ and the worker running as a service.
 
 ## Not covered
 
-Multiple workers or hosts, high availability, log shipping and alerting, a CSP, secret rotation
+Multiple workers or hosts, high availability, log shipping and alerting, secret rotation
 procedures, and automated backups.

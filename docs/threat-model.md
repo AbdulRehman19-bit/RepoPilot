@@ -79,6 +79,6 @@ against the code as of step 17. A control listed here has a test unless marked o
   address, not the user's, when the API sits behind a reverse proxy that does not forward it.
 - **Source code goes to the model.** With the local Ollama provider it stays on the machine;
   any hosted provider would receive private code.
-- **TLS is the proxy's job.** `docs/deploy.md` ships a Caddy configuration (automatic certificates, HSTS and other headers) that was exercised with a local CA only, not with a real domain. There is no Content-Security-Policy.
+- **TLS is the proxy's job.** `docs/deploy.md` ships a Caddy configuration (automatic certificates, HSTS, a strict Content-Security-Policy and other headers) that was exercised with a local CA only, not with a real domain.
 - **The Docker daemon is trusted.** Anyone who can start the worker's containers effectively
   controls the host; the sandbox is only as strong as Docker's isolation (shared kernel).
