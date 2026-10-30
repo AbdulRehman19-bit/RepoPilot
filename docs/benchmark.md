@@ -125,6 +125,31 @@ per-attempt outcomes recorded; the third run is after the loose-matching change 
 - **Conclusion so far:** the 3B model's main limit is the logic of its fixes, not the edit
   format. More runs per configuration (at least 5) are needed before comparing prompts or models.
 
+### A larger model: qwen2.5-coder:7b (step 23)
+
+Same harness, settings and cases; one run per set (so no variance estimate), same CPU, with the
+per-call timeout raised to 600 s because the larger model is slower.
+
+| | 3B (3 runs) | 7B (1 run) |
+|---|---|---|
+| Dev verified | 3, 4, 4 of 7 | 2 of 7 |
+| Held-out verified | 0, 0, 0 of 4 | 1 of 4 |
+| All 11 cases | 3 to 4 | 3 |
+| Median seconds, fix phase | 97 (dev), 124 (held-out) | 236 (dev), 218 (held-out) |
+| Wall-clock, both sets | about 19 min | about 39 min |
+
+- **Verified by the 7B:** `pagination_off_by_one` and `settings_keyerror_traceback` (first attempt
+  each), and `inventory_innermost_before_stdlib` (third attempt, the first held-out case any model
+  has fixed).
+- **No clear improvement.** 3 of 11 versus 3 to 4 of 11, at about twice the time. The 3B's own
+  runs varied by a case, so a one-case difference in either direction is not a finding.
+- **Different failure mix:** the 7B more often returned an answer with **no edits** at all, or an
+  edit whose search text was not found (9 of 29 attempts, against about 10 of 59 for the 3B), rather than a wrong-but-applied
+  patch. The 7B never fixed `money_misdirected_traceback`, which the 3B fixed in all three runs.
+  That points at the prompt and edit format (which were tuned for nothing in particular) as much
+  as at model size, but one run does not establish that.
+- **Not tried:** more attempts, a different prompt for the larger model, other 7B-class models,
+  and anything bigger (which will not fit usefully on this machine).
 
 ## What it found, and what changed (step 18)
 
