@@ -9,6 +9,7 @@ from sqlalchemy.orm import Session
 
 from app.api.ratelimit import per_caller
 from app.api.security import Principal, PrincipalDep, require_approvals_enabled
+from app.config import settings
 from app.db import get_session
 from app.github.pulls import (
     GitHubError,
@@ -157,7 +158,11 @@ def start_patch(
         raise HTTPException(status_code=409, detail="a patch is already being generated")
 
     patch = Patch(
-        issue_id=issue.id, repository_id=repo.id, reproduction_id=reproduction.id, status="queued"
+        issue_id=issue.id,
+        repository_id=repo.id,
+        reproduction_id=reproduction.id,
+        status="queued",
+        requested_by=principal.login,
     )
     session.add(patch)
     session.commit()
@@ -274,8 +279,17 @@ def approve(
         raise HTTPException(status_code=409, detail="a pull request was already opened")
 
     if patch.review_status is None:
+        reviewer = _reviewer(principal, body)
+        if (
+            settings.require_separate_reviewer
+            and patch.requested_by
+            and reviewer == patch.requested_by
+        ):
+            raise HTTPException(
+                status_code=403, detail="a different person than the requester must approve"
+            )
         patch.review_status = "approved"
-        patch.reviewer = _reviewer(principal, body)
+        patch.reviewer = reviewer
         patch.review_note = body.note if body else None
         patch.reviewed_at = datetime.now(UTC)
         session.commit()  # keep the decision even if GitHub fails; retry with /open-pr

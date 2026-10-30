@@ -5,6 +5,7 @@ from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import RedirectResponse, Response
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from app.api.ratelimit import per_ip
@@ -39,8 +40,8 @@ def auth_config(request: Request, db: Annotated[Session, Depends(get_session)]) 
     return {
         "login_available": oauth.is_configured(),
         "login": row.login if row else None,
-        "token_required": bool(settings.api_token),
-        "open": not settings.api_token and not oauth.is_configured(),
+        "token_required": bool(settings.named_tokens()),
+        "open": not settings.named_tokens() and not oauth.is_configured(),
     }
 
 
@@ -73,8 +74,14 @@ def callback(
         logger.warning("sign-in failed: %s", exc)
         raise HTTPException(status_code=502, detail="GitHub sign-in failed; try again") from exc
 
-    user = upsert_user(db, profile.github_id, profile.login)
-    db.flush()
+    try:
+        user = upsert_user(db, profile.github_id, profile.login)
+        db.flush()
+    except IntegrityError:
+        # Two first-time sign-ins by the same person raced to create the row; the other one won.
+        db.rollback()
+        user = upsert_user(db, profile.github_id, profile.login)
+        db.flush()
     token = sessions.create_session(db, user, profile.access)
 
     response = RedirectResponse(settings.frontend_url, status_code=302)

@@ -43,7 +43,7 @@ def _refuse(retry_after: int) -> HTTPException:
 
 
 def _who(principal: Principal) -> str:
-    return f"user:{principal.login}" if principal.kind == "user" else principal.kind
+    return f"{principal.kind}:{principal.login}" if principal.login else principal.kind
 
 
 def per_caller(bucket: str, setting: str) -> Callable:

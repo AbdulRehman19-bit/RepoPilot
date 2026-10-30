@@ -35,6 +35,11 @@ class Settings(BaseSettings):
     # Shared secret for the API. When empty the API is open (local development only), and the
     # approval endpoints, which write to GitHub, refuse to work.
     api_token: str = ""
+    # More than one credential, each with a name that is recorded as the reviewer:
+    # "alice:token-one,ci:token-two". The single api_token above counts as the name "admin".
+    api_tokens: str = ""
+    # When true, whoever asked for a patch cannot also approve it (a second pair of eyes).
+    require_separate_reviewer: bool = False
     # Request size caps, in bytes. Webhooks carry whole issue bodies; API calls are small JSON.
     max_webhook_bytes: int = 5_000_000
     max_request_bytes: int = 1_000_000
@@ -56,10 +61,21 @@ class Settings(BaseSettings):
     github_client_secret: str = ""
     github_oauth_url: str = "https://github.com"
     frontend_url: str = "http://localhost:5173"
-    session_ttl_hours: int = 8
+    session_ttl_hours: int = 4
     # Secure cookies need HTTPS. Chrome and Firefox accept them on http://localhost; some browsers
     # (notably Safari) do not, so set this to false for local development there.
     session_cookie_secure: bool = True
+
+    def named_tokens(self) -> dict[str, str]:
+        """Every accepted API credential as {name: token}."""
+        tokens: dict[str, str] = {}
+        for item in self.api_tokens.split(","):
+            name, _, token = item.strip().partition(":")
+            if name.strip() and token.strip():
+                tokens[name.strip()] = token.strip()
+        if self.api_token:
+            tokens.setdefault("admin", self.api_token)
+        return tokens
 
     def github_private_key(self) -> str:
         if not self.github_private_key_path:

@@ -30,7 +30,7 @@ _URL_CREDENTIALS = re.compile(r"(://[^/\s:@]+:)[^@\s/]+(@)")
 
 
 def _configured_secrets() -> list[str]:
-    values = (settings.api_token, settings.github_webhook_secret)
+    values = (*settings.named_tokens().values(), settings.github_webhook_secret)
     return [v for v in values if v and len(v) >= MIN_SECRET_LENGTH]
 
 

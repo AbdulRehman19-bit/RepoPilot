@@ -193,6 +193,7 @@ class Patch(TimestampMixin, Base):
     # Human review. review_status is None until someone decides; the pr_* fields are set once
     # a draft pull request exists.
     review_status: Mapped[str | None] = mapped_column(String(16))  # "approved" | "rejected"
+    requested_by: Mapped[str | None] = mapped_column(String(255))
     reviewer: Mapped[str | None] = mapped_column(String(255))
     review_note: Mapped[str | None] = mapped_column(Text)
     reviewed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))

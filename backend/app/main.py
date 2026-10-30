@@ -14,7 +14,7 @@ from app.config import settings
 from app.github.router import router as github_router
 
 logger = logging.getLogger(__name__)
-if not settings.api_token and not settings.github_client_id:
+if not settings.named_tokens() and not settings.github_client_id:
     logger.warning(
         "Neither REPOPILOT_GITHUB_CLIENT_ID nor REPOPILOT_API_TOKEN is set: the API is open and "
         "approvals are disabled. Fine for local development, never for anything reachable from "

@@ -42,29 +42,40 @@ against the code as of step 17. A control listed here has a test unless marked o
 | T11 | PR contains something other than what was verified | PR diff is rebuilt from GitHub's own file list and must equal the verified diff; base-branch staleness check | tested |
 | T12 | Clone token leaking | Passed via `http.extraheader`, never in the URL; clone errors are redacted | tested |
 
+## Closed in step 24
+
+| # | Threat | Control | Status |
+|---|---|---|---|
+| T16 | A hostile repo fills the worker's disk | A watchdog polls every writable directory of a run (the checkout copy and any install target) and kills the container past `sandbox_disk_limit_bytes` (1 GB) or `sandbox_max_files` (100,000); an oversized checkout is refused before any container starts; the copy is deleted either way | tested with endless-file and endless-byte attacks |
+| T17 | One caller queues unlimited work | Per-caller hourly limits on sandbox/patch jobs (30) and model calls (60), shared across API processes via Redis; sign-in endpoints are limited per client address per minute (20); `429` with `Retry-After` | tested |
+| T18 | An API credential cannot be traced to a person | `REPOPILOT_API_TOKENS="alice:...,ci:..."` gives each credential a name that is recorded as the reviewer and as the requester of a patch and cannot be overridden by the request body | tested |
+| T19 | The person who asked for a patch also approves it | `REPOPILOT_REQUIRE_SEPARATE_REVIEWER=true` refuses approval by the recorded requester (off by default, since a solo user would be locked out) | tested |
+| T20 | Revoked access keeps working until the session expires | Sessions default to 4 hours; `python -m app.auth.revoke <login>` or `--all` ends them immediately | tested |
+| T21 | Cookie requests refused behind a proxy that rewrites `Host` | The configured `frontend_url` origin is accepted alongside the request's own host | tested |
+
 ## Known gaps (not fixed)
 
-- **Dependency install has network access.** The install phase must reach PyPI, so a malicious
-  dependency name or sdist-free wheel runs with network (but no secrets, no project code).
-  Mitigation to build: a package allowlist or a pull-through mirror.
-- **Disk exhaustion.** Per-file size is capped (50 MB) but the number of files and the total
-  written to the throwaway workspace are not. A hostile repo can fill the worker's disk.
+- **Dependency install still has network access.** It needs PyPI. What limits it: only prebuilt
+  wheels are installed (no build scripts run), direct URLs, VCS references, local paths and
+  option lines are skipped, the container holds no secrets and no project code, and it is
+  covered by the disk quota. What does not: the container can reach any host, not only PyPI, and
+  a repository can still make RepoPilot install any package name it chooses. Closing this needs
+  an egress proxy or a pull-through mirror that only serves allowed packages.
 - **Redaction is pattern-based.** A secret in an unrecognised format passes through. Secrets
   committed to a repo are also in the copy the sandbox sees.
 - **Replay window is 24 h**, and the Redis claim fails open if Redis is down. GitHub sends no
   timestamp, so an older capture of a valid signed body can be replayed after the window.
-- **Permissions are a snapshot.** A user's repository access is read from GitHub at sign-in and
-  kept for the session (8 hours by default). Removing someone's access on GitHub does not end
-  their session; ending it early means deleting the row in `login_sessions`.
-- **The shared API token is still a root key**: it reaches every repository and its holder is not
-  identified in audit fields. Leave it unset if scripts are not needed.
+- **Permissions are a snapshot** for the session (4 hours by default). Removing someone's access
+  on GitHub takes effect at the next sign-in, or immediately with the revoke command.
+- **API tokens reach every repository.** Naming them makes them traceable, not narrower. Leave
+  them unset if no scripts need the API.
 - **Sign-in has not been exercised against real GitHub.** It is tested against a faithful fake of
   the OAuth and REST endpoints; the first real login may surface differences (callback URL,
   permission names).
-- **No organisation-level policy.** Any user with write access on GitHub can approve, including
-  the author of the issue; there is no "second reviewer" rule.
-- **No rate limiting.** An authenticated caller can queue unlimited jobs. `Content-Length`-less
-  (chunked) API bodies are not size-capped at the app layer; put a reverse proxy in front.
+- **Rate limits fail open if Redis is down**, and the per-address login limit sees the proxy's
+  address, not the user's, when the API sits behind a reverse proxy that does not forward it.
+- **`Content-Length`-less (chunked) API bodies are not size-capped at the app layer**; put a
+  reverse proxy in front.
 - **Source code goes to the model.** With the local Ollama provider it stays on the machine;
   any hosted provider would receive private code.
 - **TLS and network exposure are not handled by the app.** Run it behind a TLS-terminating proxy.

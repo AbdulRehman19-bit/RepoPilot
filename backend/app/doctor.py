@@ -175,12 +175,12 @@ def check_signin() -> list[Result]:
         )
     elif has_id:
         results.append(Result(PASS, "sign-in", "GitHub sign-in is configured"))
-    elif settings.api_token:
+    elif settings.named_tokens():
         results.append(
             Result(
                 WARN,
                 "sign-in",
-                "only the shared API token protects the API; everyone with it is an admin",
+                "only API tokens protect the API; every token holder can reach every repository",
             )
         )
     else:

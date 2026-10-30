@@ -55,17 +55,30 @@ def _unauthorized(detail: str) -> HTTPException:
 
 
 def same_origin(request: Request) -> bool:
+    """The request came from our own page: its Origin is this host, or the configured frontend
+    (which differs from the Host header when a proxy rewrites it)."""
     origin = request.headers.get("origin")
-    host = request.headers.get("host")
-    return bool(origin and host and urlsplit(origin).netloc == host)
+    if not origin:
+        return False
+    allowed = {request.headers.get("host"), urlsplit(settings.frontend_url).netloc}
+    return urlsplit(origin).netloc in allowed - {None, ""}
 
 
 def get_principal(request: Request, db: Annotated[Session, Depends(get_session)]) -> Principal:
+    tokens = settings.named_tokens()
     bearer = request.headers.get("authorization", "")
-    if bearer and settings.api_token:
-        supplied = bearer.removeprefix("Bearer ").strip()
-        if hmac.compare_digest(supplied.encode(), settings.api_token.encode()):
-            return Principal("admin")
+    if bearer and tokens:
+        supplied = bearer.removeprefix("Bearer ").strip().encode()
+        matched: tuple[str, str] | None = None
+        for name, token in tokens.items():  # compare against all, so timing says nothing
+            if hmac.compare_digest(supplied, token.encode()):
+                matched = (name, token)
+        if matched is not None:
+            name, token = matched
+            # Only named tokens say who is calling. The legacy single token is anonymous, so a
+            # reviewer name typed into the page is still recorded for it.
+            legacy = settings.api_token and name == "admin" and token == settings.api_token
+            return Principal("admin", None if legacy else name)
 
     row = sessions.find_session(db, request.cookies.get(sessions.COOKIE_NAME))
     if row is not None:
@@ -75,7 +88,7 @@ def get_principal(request: Request, db: Annotated[Session, Depends(get_session)]
             raise HTTPException(status_code=403, detail="cross-origin request refused")
         return Principal("user", row.login, {int(k): v for k, v in row.access.items()})
 
-    if not settings.api_token and not oauth.is_configured():
+    if not tokens and not oauth.is_configured():
         return Principal("open")
     raise _unauthorized("sign in, or send a valid API token")
 
