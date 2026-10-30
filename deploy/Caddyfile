@@ -1,0 +1,24 @@
+# TLS is automatic for a real domain (Let's Encrypt); for `localhost` Caddy uses its own local CA.
+{$SITE_ADDRESS} {
+	encode gzip
+
+	header {
+		Strict-Transport-Security "max-age=31536000"
+		X-Content-Type-Options "nosniff"
+		X-Frame-Options "DENY"
+		Referrer-Policy "same-origin"
+		-Server
+	}
+
+	# GitHub calls /api/github/webhook; the sign-in callback is /api/auth/callback.
+	handle /api/* {
+		uri strip_prefix /api
+		reverse_proxy api:8000
+	}
+
+	handle {
+		root * /srv/frontend
+		try_files {path} /index.html
+		file_server
+	}
+}

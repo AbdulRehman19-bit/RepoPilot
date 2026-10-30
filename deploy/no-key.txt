@@ -1,0 +1,1 @@
+# placeholder so the compose secret has a file when no GitHub App key is configured yet

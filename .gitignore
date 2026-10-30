@@ -22,3 +22,4 @@ dist/
 
 # Benchmark run output
 backend/bench/results/
+.env.prod
