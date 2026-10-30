@@ -17,6 +17,9 @@ export interface Repository {
 
 const TOKEN_KEY = 'repopilot_api_token'
 
+// Fired when any call is refused for lack of credentials, e.g. a session that has expired.
+export const UNAUTHORIZED_EVENT = 'repopilot:unauthorized'
+
 export function getToken(): string {
   try {
     return sessionStorage.getItem(TOKEN_KEY) ?? ''
@@ -40,6 +43,7 @@ async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
   if (token) headers.set('Authorization', `Bearer ${token}`)
   if (init.body) headers.set('Content-Type', 'application/json')
   const response = await fetch(`/api${path}`, { ...init, headers })
+  if (response.status === 401) window.dispatchEvent(new Event(UNAUTHORIZED_EVENT))
   if (!response.ok) {
     const detail = await response.json().then((body) => body.detail).catch(() => null)
     throw new Error(detail ?? `API returned ${response.status}`)

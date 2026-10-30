@@ -9,7 +9,7 @@ The differentiator is **reproducibility and verification**, not just code genera
 - Language: Python
 - Test framework: pytest
 - Model: local, via Ollama (CPU only); the system stays useful without it (static analysis + deterministic test runs)
-- Stack: FastAPI, PostgreSQL, Redis/RQ, Docker, LangGraph, React
+- Stack: FastAPI, PostgreSQL, Redis/RQ, Docker, React. The pipeline (retrieve, reproduce, patch, verify) is plain Python, not an agent framework.
 
 ## Status
 

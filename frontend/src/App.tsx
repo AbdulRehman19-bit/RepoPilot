@@ -1,5 +1,14 @@
 import { useEffect, useState } from 'react'
-import { fetchAuthConfig, fetchHealth, getToken, setToken, signOut, type AuthConfig, type Health } from './api'
+import {
+  UNAUTHORIZED_EVENT,
+  fetchAuthConfig,
+  fetchHealth,
+  getToken,
+  setToken,
+  signOut,
+  type AuthConfig,
+  type Health,
+} from './api'
 import IssueInvestigator from './IssueInvestigator'
 import RepositoryList from './RepositoryList'
 
@@ -68,6 +77,13 @@ export default function App() {
   useEffect(() => {
     fetchAuthConfig().then(setAuth).catch((e: Error) => setError(e.message))
   }, [version])
+  // A refused call usually means the session ended. Re-check who we are (this does not remount
+  // the data views, so it cannot loop); if we are signed out the sign-in prompt replaces them.
+  useEffect(() => {
+    const recheck = () => fetchAuthConfig().then(setAuth).catch(() => undefined)
+    window.addEventListener(UNAUTHORIZED_EVENT, recheck)
+    return () => window.removeEventListener(UNAUTHORIZED_EVENT, recheck)
+  }, [])
 
   const canUse = auth !== null && (auth.open || auth.login !== null || getToken() !== '')
 
@@ -80,7 +96,7 @@ export default function App() {
         {error ? `unreachable (${error})` : health ? `${health.status} (${health.environment})` : 'checking…'}
       </p>
       {auth && <Account auth={auth} onChange={() => setVersion((v) => v + 1)} />}
-      {auth && !canUse && <p>Sign in to see your repositories.</p>}
+      {auth && !canUse && <p>Sign in to see your repositories. (Your session may have ended.)</p>}
       {canUse && (
         <>
           <RepositoryList key={`repos-${version}`} />
