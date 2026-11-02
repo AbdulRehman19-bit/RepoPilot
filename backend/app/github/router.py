@@ -10,8 +10,8 @@ from app.config import settings
 from app.db import get_session
 from app.github import replay
 from app.github.events import handle_event
+from app.github.indexing import queue_indexing
 from app.github.webhooks import verify_signature
-from app.models import Repository
 from app.worker.queue import enqueue_index
 
 logger = logging.getLogger(__name__)
@@ -24,23 +24,7 @@ def _process(session: Session, event: str, payload: dict) -> bool:
         return False
     session.flush()
 
-    # Index repositories we have not indexed yet (or that failed); skip ones already in flight.
-    pending = {r.id: r for r in repos if r.index_status in ("pending", "failed")}
-    for repo in pending.values():
-        repo.index_status = "queued"
-        repo.index_error = None
-    session.commit()
-
-    # Enqueue only after the commit so the worker is guaranteed to see the rows.
-    for repo_id in pending:
-        try:
-            enqueue_index(repo_id)
-        except Exception:
-            logger.exception("could not enqueue indexing for repository %s", repo_id)
-            repo = session.get(Repository, repo_id)
-            repo.index_status = "failed"
-            repo.index_error = "could not enqueue indexing job"
-            session.commit()
+    queue_indexing(session, repos, enqueue_index)
     return True
 
 
